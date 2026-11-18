@@ -134,7 +134,6 @@ canvas#gl:active{cursor:grabbing}
 </head>
 <body>
 
-
 <div id="loading">جاري تجهيز الخط…</div>
 <canvas id="gl"></canvas>
 <div id="cab"></div>
@@ -172,6 +171,7 @@ canvas#gl:active{cursor:grabbing}
 
 <div id="actions" class="hud">
   <button class="btn" id="bCam">الكاميرا<span class="key">C</span></button>
+  <button class="btn" id="bSwitch">التحويلة<span class="key">V</span></button>
   <button class="btn" id="bSafe" aria-pressed="false">بدون حوادث<span class="key">N</span></button>
   <button class="btn" id="bCruise">مثبت السرعة<span class="key">X</span></button>
   <button class="btn" id="bHorn">البوق<span class="key">H</span></button>
@@ -310,6 +310,7 @@ let mapKey='desert';try{const k=localStorage.getItem('desertMap');if(MAPS[k])map
 let MP=MAPS[mapKey];
 
 /* ================= track ================= */
+let XOVERS=[];const XL=90,LANE2=-4.7;
 let X,Z,HD,K,YE,CANT=[0],TOTAL,ZONES,STOP_S,BUFFER_S,STATIONS;const START_FRONT=260;
 function buildTrack(){X=[0];Z=[0];HD=[0];K=[0];const GR=[0];let x=0,z=0,h=0,gr=0;const step=k=>{h+=k;x+=Math.sin(h);z+=Math.cos(h);X.push(x);Z.push(z);HD.push(h);K.push(k);GR.push(gr)};
  for(const g of MP.segs){gr=(g.g||0)/100;if(g.S){for(let i=0;i<g.S;i++)step(0)}else{const n=Math.round(g.R*g.a*Math.PI/180);for(let i=0;i<n;i++)step(g.d/g.R)}}
@@ -317,10 +318,16 @@ function buildTrack(){X=[0];Z=[0];HD=[0];K=[0];const GR=[0];let x=0,z=0,h=0,gr=0
  YE=[0];for(let i=1;i<GR.length;i++)YE.push(YE[i-1]+GR[i]);const yEnd=YE[YE.length-1];for(let i=0;i<YE.length;i++)YE[i]-=yEnd;
  TOTAL=X.length-1;ZONES=[];let i=0;while(i<=TOTAL){if(K[i]!==0){const j0=i;while(i<=TOTAL&&K[i]!==0)i++;ZONES.push({s0:j0,s1:i,R:Math.abs(1/K[j0]),dir:Math.sign(K[j0])})}else i++}
  CANT=K.map(k=>k?Math.sign(k)*Math.min(0.09,60*Math.abs(k)):0);for(let pass=0;pass<2;pass++){const c=CANT.slice();for(let i=0;i<CANT.length;i++){let a=0,n=0;for(let j=Math.max(0,i-40);j<=Math.min(CANT.length-1,i+40);j+=4){a+=c[j];n++}CANT[i]=a/n}}
- STOP_S=TOTAL-260;BUFFER_S=TOTAL-40;STATIONS=[{name:MP.st[0],s0:40,s1:420},{name:MP.st[1],s0:TOTAL-560,s1:TOTAL-120}]}
+ STOP_S=TOTAL-260;BUFFER_S=TOTAL-40;STATIONS=[{name:MP.st[0],s0:40,s1:420},{name:MP.st[1],s0:TOTAL-560,s1:TOTAL-120}];
+ XOVERS=[];{let last=-1e9;for(let q=1000;q<TOTAL-1600;q+=10){if(q-last<2200)continue;let ok=true;for(let r2=q-320;r2<=q+XL+60;r2+=10)if(K[clamp(r2,0,TOTAL)]!==0){ok=false;break}
+  if(ok&&!STATIONS.some(st=>q+XL>st.s0-200&&q-320<st.s1+50)){XOVERS.push({s0:q,div:false});last=q}}}}
 buildTrack();
 function zoneLim(z){return Math.min(TR.vmax,Math.floor(Math.sqrt(TR.safe*z.R)*KMH/10)*10)}
-function limitAt(s){for(const z of ZONES)if(s>=z.s0-30&&s<=z.s1+30)return zoneLim(z);return TR.vmax}
+function limitAt(s){let l=TR.vmax;for(const z of ZONES)if(s>=z.s0-30&&s<=z.s1+30){l=zoneLim(z);break}
+ if(typeof state!=='undefined'){for(const X of XOVERS)if(X.div&&s>=X.s0-30&&s<=X.s0+XL+30)l=Math.min(l,60);for(const t of state.route)if(s>=t.s0-30&&s<=t.s0+XL+30)l=Math.min(l,60)}return l}
+// which line the train is on at distance s (0 = main, LANE2 = second line), following the crossovers it has taken
+function laneOff(s){let lane=0;for(const t of state.route){if(s<t.s0)break;const u=(s-t.s0)/XL;if(u<1)return LANE2*lerp(t.from,t.to,u*u*(3-2*u));lane=t.to}return LANE2*lane}
+function atL(s,y=0){return at(s,laneOff(s),y)}
 function at(s,off=0,y=0){s=clamp(s,0,TOTAL);const i=Math.min(Math.floor(s),TOTAL-1),f=s-i;const h=lerp(HD[i],HD[i+1],f);return new THREE.Vector3(lerp(X[i],X[i+1],f)+Math.cos(h)*off,y+lerp(YE[i],YE[i+1],f),lerp(Z[i],Z[i+1],f)-Math.sin(h)*off)}
 function cantAt(s){return CANT[clamp(Math.round(s),0,TOTAL)]||0}
 function elevAt(s){s=clamp(s,0,TOTAL);const i=Math.min(Math.floor(s),TOTAL-1);return lerp(YE[i],YE[i+1],s-i)}
@@ -384,14 +391,14 @@ function obsNear(x,z,R){const out=new Set();for(let gx=Math.floor((x-R)/OCELL);g
 function regObs(type,meta,parts,S,r,h){meta.forEach((mt,i)=>{addObs({type,shape:'circle',x:mt.x,z:mt.z,base:new THREE.Vector3(mt.x,mt.y,mt.z),r:r(mt),S:S(mt),h:h(mt),parts:parts.map(([refs,mats,idx])=>({ref:refs[idx?idx[i]:i],M0:mats[idx?idx[i]:i]})).filter(q=>q.ref)})})}
 function streamChunks(){const p=cam.position;for(const im of chunks){im.visible=p.distanceTo(im.userData.c)<im.userData.r}}
 function sweep(profile,mat,off,s0=0,s1=TOTAL,ds=2,uS=1,vS=1,cast=false){const v=[],uv=[],idx=[];const n=profile.length;const ul=[0];for(let i=1;i<n;i++)ul.push(ul[i-1]+Math.hypot(profile[i][0]-profile[i-1][0],profile[i][1]-profile[i-1][1]));
- let row=0;for(let s=s0;s<=s1+1e-6;s+=ds,row++){const sv=sideV(s),p=at(s),ca=Math.sin(cantAt(s));profile.forEach(([x,y],j)=>{const xr=off+x;v.push(p.x+sv.x*xr,y+p.y+(Math.abs(xr)<=4.2?-xr*ca:0),p.z+sv.z*xr);uv.push(ul[j]*uS,s*vS)});if(row)for(let j=0;j<n-1;j++){const a=(row-1)*n+j,b=row*n+j;idx.push(a,a+1,b,b,a+1,b+1)}}
+ let row=0;for(let s=s0;s<=s1+1e-6;s+=ds,row++){const sv=sideV(s),p=at(s),ca=Math.sin(cantAt(s));const o0=typeof off==='function'?off(s):off;profile.forEach(([x,y],j)=>{const xr=o0+x;v.push(p.x+sv.x*xr,y+p.y+(Math.abs(xr)<=4.2?-xr*ca:0),p.z+sv.z*xr);uv.push(ul[j]*uS,s*vS)});if(row)for(let j=0;j<n-1;j++){const a=(row-1)*n+j,b=row*n+j;idx.push(a,a+1,b,b,a+1,b+1)}}
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();const m=new THREE.Mesh(g,mat);m.receiveShadow=true;m.castShadow=cast;world.add(m);return m}
 function mergeGeos(list){const pos=[],nor=[];for(const g of list){const n=g.index?g.toNonIndexed():g;n.computeVertexNormals();pos.push(...n.attributes.position.array);nor.push(...n.attributes.normal.array)}const m=new THREE.BufferGeometry();m.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));m.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));return m}
 function textTex(lines,w,h,bg,fg,font){const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');if(bg){g.fillStyle=bg;g.fillRect(0,0,w,h)}g.fillStyle=fg;g.textAlign='center';g.textBaseline='middle';g.direction='rtl';
  lines.forEach((l,i)=>{g.font=l.f||font;g.fillText(l.t,w/2,h*(i+1)/(lines.length+1))});const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t}
 function limitTex(n){const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');g.fillStyle='#fff';g.beginPath();g.arc(128,128,124,0,7);g.fill();g.lineWidth=30;g.strokeStyle='#d22';g.beginPath();g.arc(128,128,108,0,7);g.stroke();g.fillStyle='#111';g.font='bold 92px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(n,128,136);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
 const poleM=new THREE.MeshStandardMaterial({color:0x555b60,metalness:.5,roughness:.5});
-function signAt(parent,s,tex,off=-3.6,h=3.2,size=1.1){const g=new THREE.Group();const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,h),poleM);pole.position.y=h/2;g.add(pole);
+function signAt(parent,s,tex,off=3.1,h=3.2,size=1.1){const g=new THREE.Group();const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.06,h),poleM);pole.position.y=h/2;g.add(pole);
  const d=new THREE.Mesh(new THREE.CircleGeometry(size/2,40),new THREE.MeshStandardMaterial({map:tex,roughness:.6}));d.position.y=h;d.rotation.y=Math.PI;g.add(d);const back=new THREE.Mesh(new THREE.CircleGeometry(size/2,40),poleM);back.position.set(0,h,.01);g.add(back);
  g.position.copy(at(s,off));g.rotation.y=headingAt(s);g.traverse(o=>o.castShadow=true);parent.add(g)}
 let signGroup=null;
@@ -433,7 +440,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
  {const ballastM=new THREE.MeshStandardMaterial({map:ballastTex,bumpMap:ballastTex,bumpScale:4,roughness:.95,side:THREE.DoubleSide});
   const railM=new THREE.MeshStandardMaterial({color:0x6e625a,metalness:.7,roughness:.6,side:THREE.DoubleSide});
   const railTopM=new THREE.MeshStandardMaterial({color:0xe8e8ea,metalness:1,roughness:.18,side:THREE.DoubleSide});
-  if(MP.elev){const emb=new THREE.MeshStandardMaterial({color:new THREE.Color().setRGB(...MP.gA.map(v=>v/255*0.85),THREE.SRGBColorSpace),map:grainTex,roughness:1,side:THREE.DoubleSide});sweep([[-26,-9],[-12,-2.5],[-3.4,0.0],[3.4,0.0],[12,-2.5],[26,-9]],emb,0,0,TOTAL,4,0.2,0.2)}
+  if(MP.elev){const emb=new THREE.MeshStandardMaterial({color:new THREE.Color().setRGB(...MP.gA.map(v=>v/255*0.85),THREE.SRGBColorSpace),map:grainTex,roughness:1,side:THREE.DoubleSide});sweep([[-31,-9],[-17,-2.5],[-8.1,0.0],[3.4,0.0],[12,-2.5],[26,-9]],emb,0,0,TOTAL,4,0.2,0.2)}
   sweep([[-3.4,0.02],[-2.1,0.55],[2.1,0.55],[3.4,0.02]],ballastM,0,0,TOTAL,2,0.33,0.33);
   for(const rx of[-0.7175,0.7175]){
    sweep([[-0.075,0.72],[-0.075,0.74],[-0.018,0.76],[-0.018,0.83],[-0.036,0.84],[-0.036,0.892]],railM,rx,0,TOTAL,2);
@@ -441,6 +448,21 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
    sweep([[-0.036,0.892],[-0.03,0.9],[0.03,0.9],[0.036,0.892]],railTopM,rx,0,TOTAL,2)}
   {const ob=new THREE.Object3D(),M4=[];for(let i=0;i<Math.floor(TOTAL/0.65);i++){const s=i*0.65;ob.position.copy(at(s,0,0.62));ob.rotation.order='YXZ';ob.rotation.set(0,headingAt(s),-cantAt(s));ob.updateMatrix();M4.push(ob.matrix.clone())}
    addInst(new THREE.BoxGeometry(2.6,0.2,0.3),new THREE.MeshStandardMaterial({map:concTex,color:0x8f8b84,roughness:.9}),M4,false,'near')}}
+ // second line, crossovers (both diagonals) and a signal before each
+ {const ballastM=new THREE.MeshStandardMaterial({map:ballastTex,bumpMap:ballastTex,bumpScale:4,roughness:.95,side:THREE.DoubleSide});
+  const railM=new THREE.MeshStandardMaterial({color:0x6e625a,metalness:.7,roughness:.6,side:THREE.DoubleSide}),railTopM=new THREE.MeshStandardMaterial({color:0xe8e8ea,metalness:1,roughness:.18,side:THREE.DoubleSide});
+  const RP=[[[-0.075,0.72],[-0.075,0.74],[-0.018,0.76],[-0.018,0.83],[-0.036,0.84],[-0.036,0.892]],[[0.036,0.892],[0.036,0.84],[0.018,0.83],[0.018,0.76],[0.075,0.74],[0.075,0.72]]];const RT=[[-0.036,0.892],[-0.03,0.9],[0.03,0.9],[0.036,0.892]];
+  const line=(off,s0,s1,ds,ballast)=>{if(ballast)sweep([[-3.4,0.02],[-2.1,0.55],[2.1,0.55],[3.4,0.02]],ballastM,off,s0,s1,ds,0.33,0.33);for(const rx of[-0.7175,0.7175]){const o=typeof off==='function'?(q=>off(q)+rx):off+rx;for(const pr of RP)sweep(pr,railM,o,s0,s1,ds);sweep(RT,railTopM,o,s0,s1,ds)}};
+  line(LANE2,0,TOTAL,2,true);
+  {const ob=new THREE.Object3D(),M4=[];for(let i=0;i<Math.floor(TOTAL/0.65);i++){const q=i*0.65;ob.position.copy(at(q,LANE2,0.62));ob.rotation.set(0,headingAt(q),0);ob.updateMatrix();M4.push(ob.matrix.clone())}
+   addInst(new THREE.BoxGeometry(2.6,0.2,0.3),new THREE.MeshStandardMaterial({map:concTex,color:0x8f8b84,roughness:.9}),M4,false,'near')}
+  const sm=u=>u*u*(3-2*u);const standM=new THREE.MeshStandardMaterial({color:0x2a2c2e,roughness:.6}),standY=new THREE.MeshStandardMaterial({color:0xe8b81e,roughness:.5});
+  for(const Xo of XOVERS){const a=Xo.s0,b=Xo.s0+XL;line(q=>LANE2*sm((q-a)/XL),a,b,1,false);line(q=>LANE2*(1-sm((q-a)/XL)),a,b,1,false);
+   for(const [q,o] of [[a-4,2.7],[b+4,LANE2-2.7]]){const st=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.6,0.5),standM);st.position.copy(at(q,o,0.85));world.add(st);const lv=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.9,0.08),standY);lv.position.copy(at(q,o,1.5));world.add(lv)}
+   // signal
+   const g=new THREE.Group();const pole=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,5.2,10),standM);pole.position.y=2.6;g.add(pole);const head=new THREE.Mesh(new THREE.BoxGeometry(.55,1.5,.35),standM);head.position.y=5.4;g.add(head);
+   const mk=(y)=>{const m=new THREE.MeshBasicMaterial({color:0x111111});const l=new THREE.Mesh(new THREE.SphereGeometry(.15,12,8),m);l.position.set(0,y,-0.2);g.add(l);return m};
+   Xo.sig={r:mk(5.85),y:mk(5.4),g:mk(4.95)};g.position.copy(at(a-250,3.1));g.rotation.y=headingAt(a-250);world.add(g)}}
  // overhead wires
  {const mastM=new THREE.MeshStandardMaterial({color:0x9aa0a6,metalness:.6,roughness:.45});const n=Math.floor(TOTAL/60);const ob=new THREE.Object3D();const cw=[],mw=[],mM=[],aM=[],dM=[],meta=[];
   for(let i=0;i<n;i++){const s=i*60+20;ob.rotation.set(0,headingAt(s),0);ob.position.copy(at(s,3.9,3.7));ob.updateMatrix();mM.push(ob.matrix.clone());ob.position.copy(at(s,1.95,7.1));ob.updateMatrix();aM.push(ob.matrix.clone());ob.position.copy(at(s,0,6.4));ob.updateMatrix();dM.push(ob.matrix.clone());cw.push(at(s,(i%2?.2:-.2),5.75));mw.push(at(s,0,7.05));const b=at(s,3.9,0);meta.push({x:b.x,y:b.y,z:b.z})}
@@ -448,7 +470,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
   regObs('pole',meta,[[r1,mM],[r2,aM],[r3,dM]],()=>25,()=>0.3,()=>7.5);
   const wm=new THREE.LineBasicMaterial({color:MP.sky.night?0x8890a0:0x2a2522});for(const L of[cw,mw])world.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(L),wm))}
  // vegetation, rocks and buildings (chunked; each one is also a physical obstacle)
- {const ob=new THREE.Object3D();const pick=(minOff,spread)=>{for(let t=0;t<8;t++){const s=rnd()*TOTAL;const sg=MP.sea?-1:(rnd()<.5?-1:1);const off=sg*(minOff+rnd()*rnd()*spread);const p=at(s,off);if(!MP.sea||off<0){p.y=Math.max(groundH(p.x,p.z),MP.sea?-1.4:-1e9);return p}}return at(rnd()*TOTAL,-minOff)};
+ {const ob=new THREE.Object3D();const pick=(minOff,spread)=>{for(let t=0;t<8;t++){const s=rnd()*TOTAL;const sg=MP.sea?-1:(rnd()<.5?-1:1);const off=sg*(minOff+rnd()*rnd()*spread)+(sg<0?-4.7:0);const p=at(s,off);if(!MP.sea||off<0){p.y=Math.max(groundH(p.x,p.z),MP.sea?-1.4:-1e9);return p}}return at(rnd()*TOTAL,-minOff)};
   const mat=()=>{ob.updateMatrix();return ob.matrix.clone()};const here=k=>({x:ob.position.x,y:ob.position.y,z:ob.position.z,k});
   const rockM=new THREE.MeshStandardMaterial({color:MP.rockCol,roughness:1,flatShading:true});
   const nR=(MP.veg==='rock'?1.6:1)*(isMobile?1200:2200);const R4=[],Rm=[];
@@ -595,12 +617,12 @@ const ctrTex=canvasTex(256,(g,s)=>{g.fillStyle='#ffffff';g.fillRect(0,0,s,s);for
 const CTR_COL=[0xb33a2a,0x2a6fb3,0x3c8a4a,0xd08a2a,0x6b6f75,0x8a2a6b,0x1f8a8a];const ctrMats=CTR_COL.map(c=>new THREE.MeshStandardMaterial({color:c,map:ctrTex,roughness:.6,metalness:.3}));
 function containerCar(){const g=new THREE.Group();const len=18.6;
  part(g,new THREE.BoxGeometry(2.6,0.35,18.4),M.dark,0,1.65,9.3);for(const s of[-1,1])part(g,new THREE.BoxGeometry(0.1,0.5,18.4),M.dark,s*1.25,1.5,9.3);
- for(const z of[4.7,13.9]){if(rnd()<0.12)continue;const m=ctrMats[Math.floor(rnd()*ctrMats.length)];const c=det2(part(g,new THREE.BoxGeometry(2.44,2.6,8.6),m,0,3.13,z))}
+ for(const z of[4.7,13.9]){if(rnd()<0.12)continue;const m=ctrMats[Math.floor(rnd()*ctrMats.length)];const c=det2(part(g,new THREE.BoxGeometry(2.44,2.6,8.6),m,0,3.13,z));c.userData.heavy=1}
  bogie(g,2.2);bogie(g,16.4);
  return{g,len,half:new THREE.Vector3(1.3,1.5,len/2),comY:2.6}}
 function tankCar(alt){const g=new THREE.Group();const len=15.2,mat=alt?M.tank2:M.tank;
  part(g,new THREE.BoxGeometry(2.2,0.3,15),M.dark,0,1.7,7.6);
- part(g,new THREE.CylinderGeometry(1.3,1.3,12.2,32),mat,0,3.15,7.6,Math.PI/2);
+ {const tk=part(g,new THREE.CylinderGeometry(1.3,1.3,12.2,32,48),mat,0,3.15,7.6,Math.PI/2);tk.userData.dent=1}
  for(const z of[1.5,13.7]){const e=part(g,new THREE.SphereGeometry(1.3,28,14),mat,0,3.15,z);e.scale.z=0.32}
  for(const z of[4.2,11])part(g,new THREE.CylinderGeometry(1.32,1.32,0.12,32),M.dark,0,3.15,z,Math.PI/2);
  part(g,new THREE.CylinderGeometry(.45,.5,.45,16),mat,0,4.6,7.6);part(g,new THREE.BoxGeometry(1.4,0.06,2.4),M.dark,0,4.48,7.6);
@@ -696,7 +718,7 @@ function tender(T){const g=new THREE.Group();const len=T.len;
  part(g,new THREE.BoxGeometry(2.0,0.4,len-0.4),M.black2,0,1.45,len/2);
  part(g,new THREE.BoxGeometry(2.8,2.0,len-0.8),T.body,0,2.65,len/2);
  for(const s of[-1,1])part(g,new THREE.BoxGeometry(0.03,0.08,len-1),T.stripe,s*1.41,2.0,len/2);
- const cg=new THREE.BoxGeometry(2.5,0.8,len*0.62,8,2,10);{const p=cg.attributes.position;for(let i=0;i<p.count;i++)if(p.getY(i)>0)p.setY(i,p.getY(i)+(rnd()-.3)*0.35);cg.computeVertexNormals()}const coal=part(g,cg,M.coal,0,3.75,len*0.57);coal.userData.det=1;
+ const cg=new THREE.BoxGeometry(2.5,0.8,len*0.62,8,2,10);{const p=cg.attributes.position;for(let i=0;i<p.count;i++)if(p.getY(i)>0)p.setY(i,p.getY(i)+(rnd()-.3)*0.35);cg.computeVertexNormals()}const coal=part(g,cg,M.coal,0,3.75,len*0.57);coal.userData.det=1;coal.userData.heavy=1;
  part(g,new THREE.BoxGeometry(2.9,0.08,0.08),T.stripe,0,3.66,len-0.4);
  for(const s of[-1,1]){part(g,new THREE.BoxGeometry(0.16,0.14,len-0.8),T.body,s*1.44,3.68,len/2,0,0,s*0.5);part(g,new THREE.BoxGeometry(0.03,0.05,len-1.2),T.stripe,s*1.415,3.3,len/2);part(g,new THREE.BoxGeometry(0.03,1.4,0.03),T.stripe,s*1.42,2.6,len-1.0);part(g,new THREE.BoxGeometry(0.03,1.4,0.03),T.stripe,s*1.42,2.6,len-1.35)}
  part(g,new THREE.BoxGeometry(2.5,0.5,0.8),T.body,0,3.95,0.6);
@@ -716,7 +738,7 @@ function coach(pk='red'){const P=PALS[pk];const CB=C3(P.body),CL=C3(P.line),CR=C
 const boxMat=new THREE.MeshStandardMaterial({color:0xd9a521,map:ctrTex,roughness:.6,metalness:.2});
 function boxCar(){const g=new THREE.Group();const len=16;
  part(g,new THREE.BoxGeometry(2.6,0.35,15.8),M.dark,0,1.65,8);
- const b=part(g,new THREE.BoxGeometry(2.9,2.9,15.4,1,1,12),boxMat,0,3.3,8);b.userData.dent=1;
+ const b=part(g,new THREE.BoxGeometry(2.9,2.9,15.4,6,6,60),boxMat,0,3.3,8);b.userData.dent=1;
  part(g,new THREE.BoxGeometry(3.0,0.12,15.6),M.dGrey,0,4.8,8);
  for(const s of[-1,1])part(g,new THREE.BoxGeometry(0.04,2.4,3),M.dark,s*1.47,3.2,8);
  bogie(g,2.2);bogie(g,13.8);
@@ -726,7 +748,10 @@ function det2(o){o.userData.det=1;return o}
 /* ================= consist ================= */
 const GAP=0.7;let cars=[],TRAIN_LEN=0,loco=null;
 function disposeTrain(){for(const c of cars){if(c.pivot){sc.remove(c.pivot)}sc.remove(c.g)}cars=[]}
-function buildTrain(key){disposeTrain();TR=TRAINS[key];trainKey=key;const list=[];
+function buildTrain(key){disposeTrain();TR=TRAINS[key];trainKey=key;const list=makeList(key);
+ let off=0;for(const v of list){v.frontOff=off;off+=v.len+GAP;sc.add(v.g);v.wheels=[];v.g.traverse(o=>{if(o.userData.r)v.wheels.push(o)});cars.push(v)}
+ TRAIN_LEN=off-GAP;loco=cars[0];buildSigns()}
+function makeList(key){const list=[];
  if(key==='hsr'){list.push(emuCar('hsr',25,true,false,false),emuCar('hsr',25,false,false,true),emuCar('hsr',25,false,false,false),emuCar('hsr',25,false,false,true),emuCar('hsr',25,true,true,false))}
  if(key==='super'){list.push(emuCar('super',24,true,false,false),emuCar('super',24,false,false,true));for(let i=0;i<3;i++)list.push(emuCar('super',24,false,false,false));list.push(emuCar('super',24,false,false,true),emuCar('super',24,true,true,false))}
  if(key==='commuter'){list.push(emuCar('commuter',20,true,false,false),emuCar('commuter',20,false,false,true),emuCar('commuter',20,false,false,false),emuCar('commuter',20,true,true,false))}
@@ -736,12 +761,24 @@ function buildTrain(key){disposeTrain();TR=TRAINS[key];trainKey=key;const list=[
  if(key==='diesel'){list.push(dieselLoco('2045'),dieselLoco('2046'));for(let i=0;i<10;i++)list.push(tankCar(i%3===2))}
  if(SV[key]){const V=SV[key];list.push(steamLoco(key),tender(V.tender));for(let i=0;i<V.cars.n;i++)list.push(V.cars.kind==='box'?boxCar():coach(V.cars.pal));Object.assign(TR.cab,list[0].cab)}
  list.forEach((v,i)=>{if(!i)return;if(['hsr','super','commuter'].includes(key))part(v.g,new THREE.BoxGeometry(2.5,2.9,GAP+0.3),M.black2,0,2.55,v.len+GAP/2);else{part(v.g,new THREE.BoxGeometry(0.28,0.28,GAP+0.3),M.dark,0,1.3,v.len+GAP/2);part(v.g,new THREE.BoxGeometry(0.5,0.4,0.25),M.dark,0,1.3,v.len+0.05)}});
- let off=0;for(const v of list){v.frontOff=off;off+=v.len+GAP;sc.add(v.g);v.wheels=[];v.g.traverse(o=>{if(o.userData.r)v.wheels.push(o)});cars.push(v)}
- TRAIN_LEN=off-GAP;loco=cars[0];buildSigns()}
+ return list}
+let AIS=[],AICR=[],aiTimer=6;const AI_KEYS=['diesel','container','dpass'];
+function spawnAI(){const s0=state.s+2500+rnd()*3500;if(s0>TOTAL-80)return;const key=AI_KEYS[Math.floor(rnd()*AI_KEYS.length)];const list=makeList(key).slice(0,key==='dpass'?5:6);let off=0;
+ for(const v of list){v.frontOff=off;off+=v.len+GAP;v.laneFix=LANE2;sc.add(v.g);v.wheels=[];v.g.traverse(o=>{if(o.userData.r)v.wheels.push(o)})}AIS.push({key,list,sF:s0,v:22+rnd()*12,len:off-GAP,odo:0})}
+function placeAI(A){const P=q=>at(q,LANE2);for(const c of A.list){const f=A.sF+c.frontOff,rr=f+c.len;const B=c.g.userData.bogies;
+ if(B&&B.length===2){const zA=Math.min(B[0].z,B[1].z),zB=Math.max(B[0].z,B[1].z);const pA=P(rr-zA),pB=P(rr-zB);const d=pB.clone().sub(pA).normalize();c.g.position.copy(pA).addScaledVector(d,-zA);c.g.lookAt(c.g.position.clone().add(d));const yaw=Math.atan2(d.x,d.z);for(const b of B)b.g.rotation.y=headingAt(rr-b.z)+Math.PI-yaw}
+ else{const a0=P(rr),a1=P(f);c.g.position.copy(a0);c.g.lookAt(a1)}for(const w of c.wheels)w.rotation.x=A.odo/w.userData.r}}
+function updateAI(dt){aiTimer-=dt;if(aiTimer<=0&&AIS.length<2){spawnAI();aiTimer=25+rnd()*20}
+ for(const A of AIS){A.sF-=A.v*dt;A.odo+=A.v*dt;placeAI(A)}AIS=AIS.filter(A=>{if(A.sF+A.len<state.s-1500||A.sF<30){for(const c of A.list)sc.remove(c.g);return false}return true})}
+function clearAI(){for(const A of AIS)for(const c of A.list)sc.remove(c.g);AIS=[]}
+function updateSignals(){for(const X of XOVERS){if(!X.sig)continue;const conflict=state.lane===0&&AIS.some(A=>A.sF>X.s0-100&&A.sF<X.s0+3500);X.aspect=!X.div?'green':conflict?'red':'yellow';
+ X.sig.r.color.set(X.aspect==='red'?0xff2a1a:0x2a1414);X.sig.y.color.set(X.aspect==='yellow'?0xffc21a:0x2a2414);X.sig.g.color.set(X.aspect==='green'?0x2aff5a:0x142a18)}}
+function toggleSwitch(){const X=XOVERS.find(X=>X.s0>state.s+40);if(!X){toast('ما فيه تحويلة قدامك',1500);return}X.div=!X.div;
+ toast(`التحويلة بعد ${((X.s0-state.s)/1000).toFixed(1)} كم: ${X.div?(state.lane?'للخط الأساسي':'للخط الثاني'):'مستقيم'}`,2000)}
 function placeTrain(sF){for(const c of cars){const f=sF-c.frontOff,rr=f-c.len;const B=c.g.userData.bogies;
- if(B&&B.length===2){const zA=Math.min(B[0].z,B[1].z),zB=Math.max(B[0].z,B[1].z);const pA=at(rr+zA),pB=at(rr+zB);const d=pB.clone().sub(pA).normalize();c.g.position.copy(pA).addScaledVector(d,-zA);c.g.lookAt(c.g.position.clone().add(d));
+ if(B&&B.length===2){const zA=Math.min(B[0].z,B[1].z),zB=Math.max(B[0].z,B[1].z);const pA=atL(rr+zA),pB=atL(rr+zB);const d=pB.clone().sub(pA).normalize();c.g.position.copy(pA).addScaledVector(d,-zA);c.g.lookAt(c.g.position.clone().add(d));
   const yaw=Math.atan2(d.x,d.z);for(const b of B)b.g.rotation.y=headingAt(rr+b.z)-yaw}
- else{const a0=at(rr),a1=at(f);c.g.position.copy(a0);c.g.lookAt(a1);const P=c.g.userData.pony;if(P)P.g.rotation.y=headingAt(rr+P.z)-Math.atan2(a1.x-a0.x,a1.z-a0.z)}
+ else{const a0=atL(rr),a1=atL(f);c.g.position.copy(a0);c.g.lookAt(a1);const P=c.g.userData.pony;if(P)P.g.rotation.y=headingAt(rr+P.z)-Math.atan2(a1.x-a0.x,a1.z-a0.z)}
  const cr=cantAt(f-c.len/2);if(cr)c.g.rotateZ(-cr)}}
 
 /* ================= particles ================= */
@@ -750,12 +787,12 @@ function makeParticles(n,color,additive){const g=new THREE.BufferGeometry();g.se
   vertexShader:'attribute float alpha;attribute float size;varying float va;uniform float ps;void main(){va=alpha;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=size*ps/max(-mv.z,0.1);gl_Position=projectionMatrix*mv;}',
   fragmentShader:'uniform vec3 c;varying float va;void main(){float d=length(gl_PointCoord-.5);float k=smoothstep(.5,.0,d);gl_FragColor=vec4(c,va*k);}'});
  const pts=new THREE.Points(g,m);pts.frustumCulled=false;sc.add(pts);const P=[];for(let i=0;i<n;i++)P.push({p:new THREE.Vector3(),v:new THREE.Vector3(),life:0,max:1,s0:1,s1:1});return{g,P,m,i:0,live:0}}
-const dust=makeParticles(1600,0xcfa878,false),sparks=makeParticles(500,0xffa040,true),smoke=makeParticles(1800,0x8a857e,false),steamP=makeParticles(700,0xf2f0ec,false);
+const dust=makeParticles(1600,0xcfa878,false),sparks=makeParticles(500,0xffa040,true),smoke=makeParticles(1800,0x8a857e,false),steamP=makeParticles(700,0xf2f0ec,false),glassP=makeParticles(600,0xdff3ff,true);
 function emit(sys,p,v,life,s0,s1){const fl=p.y-2.5;const q=sys.P[sys.i=(sys.i+1)%sys.P.length];q.p.copy(p);q.v.copy(v);q.life=q.max=life;q.s0=s0;q.s1=s1;q.f=fl;sys.live=1}
 function updParticles(sys,dt,grav,drag,amax){if(!sys.live)return;const pa=sys.g.attributes.position,al=sys.g.attributes.alpha,sz=sys.g.attributes.size;let any=0;
  sys.P.forEach((q,i)=>{if(q.life>0){any=1;q.life-=dt;q.v.y-=grav*dt;q.v.multiplyScalar(1-drag*dt);q.p.addScaledVector(q.v,dt);if(q.p.y<q.f){q.p.y=q.f;q.v.y*=-0.3}const t=1-q.life/q.max;pa.setXYZ(i,q.p.x,q.p.y,q.p.z);al.setX(i,Math.max(0,amax*(1-t)*Math.min(1,t*8)));sz.setX(i,lerp(q.s0,q.s1,t))}else al.setX(i,0)});
  pa.needsUpdate=al.needsUpdate=sz.needsUpdate=true;sys.m.uniforms.ps.value=innerHeight;sys.live=any}
-function clearParticles(){for(const s of[dust,sparks,smoke,steamP]){s.P.forEach(q=>q.life=0);s.live=1;updParticles(s,0,0,0,0)}}
+function clearParticles(){for(const s of[dust,sparks,smoke,steamP,glassP]){s.P.forEach(q=>q.life=0);s.live=1;updParticles(s,0,0,0,0)}}
 
 /* ================= audio ================= */
 let AC=null,au={};
@@ -790,7 +827,7 @@ function crashSound(){if(!AC)return;const t=AC.currentTime;const s=au.noise();co
  const o=AC.createOscillator();o.frequency.setValueAtTime(70,t);o.frequency.exponentialRampToValueAtTime(30,t+1);const og=AC.createGain();og.gain.setValueAtTime(.8,t);og.gain.exponentialRampToValueAtTime(.001,t+1.2);o.connect(og).connect(au.master);o.start(t);o.stop(t+1.3)}
 
 /* ================= state & physics ================= */
-const state={mode:'menu',s:START_FRONT,v:0,odo:0,lever:0,em:false,force:0,time:0,score:1000,overT:0,cp:null,nextCp:2000,camMode:1,crashT:0,crashWhy:'',sideCam:null,chuffN:0,cruise:null,safe:false,
+const state={mode:'menu',s:START_FRONT,v:0,odo:0,lever:0,em:false,force:0,time:0,score:1000,overT:0,cp:null,nextCp:2000,camMode:1,crashT:0,crashWhy:'',sideCam:null,chuffN:0,cruise:null,safe:false,route:[],lane:0,
  orbit:{yaw:Math.PI+0.5,pitch:0.22,dist:42},look:{yaw:0,pitch:0}};
 const schedule=()=>Math.round(TOTAL/(TR.avg/KMH));
 function setLever(x){state.lever=clamp(Math.round(x*10)/10,-1,1);if(state.lever>0)state.em=false;drawLever()}
@@ -810,9 +847,14 @@ function physics(dt){const v=state.v;let target;const vmax=TR.vmax/KMH;
 function checkRules(dt){const s=state.s,v=state.v;
  if(!state.safe)for(const [ci,c] of cars.entries()){const cs=s-c.frontOff-c.len/2;const k=Math.abs(K[clamp(Math.round(cs),0,TOTAL)]);if(k>0&&v*v*k>TR.derail){startCrash('curve',`دخلت منعطف نصف قطره ${Math.round(1/k)} م بسرعة ${Math.round(v*KMH)} كم/س، والحد ${limitAt(cs)} كم/س. القوة الجانبية رمت القطار برا السكة.`,ci);return}}
  if(s>=BUFFER_S){if(v>4.2&&!state.safe){startCrash('buffer',`ما وقفت قبل نهاية الخط، وضربت المصد بسرعة ${Math.round(v*KMH)} كم/س.`);return}state.s=BUFFER_S;state.v=0;state.force=Math.min(state.force,0)}
- const lim=limitAt(s)/KMH;const over=v>lim+5/KMH;$('warn').style.display=over?'block':'none';$('spd').classList.toggle('over',over);if(over){state.score-=dt*25;state.overT+=dt}
- if(s>state.nextCp&&s<STOP_S-1500&&v>0){state.cp={s,v,time:state.time,score:state.score,lever:state.lever,odo:state.odo};state.nextCp+=2000;toast('تم الحفظ ✓',1500)}
- if(v===0&&s>STATIONS[1].s0+TRAIN_LEN&&s<=BUFFER_S&&state.lever<=0)finish()}
+ for(const X of XOVERS){if(!X.sigPassed&&s>=X.s0-250){X.sigPassed=true;if(X.aspect==='red'){state.score-=200;toast('تجاوزت إشارة حمراء! خصم 200 نقطة',2600)}}
+  if(!X.passed&&s>=X.s0){X.passed=true;if(X.div){state.route.push({s0:X.s0,from:state.lane,to:1-state.lane});state.lane=1-state.lane;toast(state.lane?'دخلت الخط الثاني، انتبه للقطارات الجاية':'رجعت للخط الأساسي',2400)}}}
+ if(!state.safe){for(const t of state.route)if(s>=t.s0&&s<=t.s0+XL+TRAIN_LEN&&v>100/KMH){startCrash('curve',`دخلت التحويلة بسرعة ${Math.round(v*KMH)} كم/س، وحدها 60. القطار طلع من السكة في التحويلة.`,0);return}
+  if(Math.abs(laneOff(s))>2.35)for(const A of AIS)if(A.sF<=s+1.5&&A.sF>=s-TRAIN_LEN-60){startCrash('collision',`دخلت الخط الثاني وكان عليه قطار جاي، وصار تصادم وجه لوجه. سرعتك ${Math.round(v*KMH)} كم/س وسرعته ${Math.round(A.v*KMH)} كم/س.`,0,A);return}}
+ const danger=Math.abs(laneOff(s))>2.35&&AIS.some(A=>A.sF>s&&A.sF-s<2500);
+ const lim=limitAt(s)/KMH;const over=v>lim+5/KMH;$('warn').textContent=danger?'قطار جاي على نفس الخط! ارجع للخط الأساسي':'تجاوزت السرعة!';$('warn').style.display=(over||danger)?'block':'none';$('spd').classList.toggle('over',over);if(over){state.score-=dt*25;state.overT+=dt}
+ if(s>state.nextCp&&s<STOP_S-1500&&v>0){state.cp={s,v,time:state.time,score:state.score,lever:state.lever,odo:state.odo,route:state.route.map(t=>({...t})),lane:state.lane};state.nextCp+=2000;toast('تم الحفظ ✓',1500)}
+ if(v===0&&s>STATIONS[1].s0+TRAIN_LEN&&s<=BUFFER_S&&state.lever<=0){if(Math.abs(laneOff(s))<1)finish();else if(!state.wrongLaneMsg){state.wrongLaneMsg=1;toast('المحطة على الخط الأساسي، مو الخط الثاني',2500)}}}
 
 /* ================= derailment (coupled cars) ================= */
 // Cars stay on the rails until the coupler of a neighbour that already left the track pulls them off
@@ -822,23 +864,29 @@ const RAIL_HOLD=12,CPL_Y=1.3,SLACK=0.15,CPL_K=5;
 function cplLoad(A,snap){A.cf=A.cf*0.8+Math.max(0,snap)*0.2;const u=A.cf*CPL_K;if(u>state.cplMax)state.cplMax=u;
  if(u>TR.cpl&&!A.broken){A.broken=true;crashBang(A);snapSnd();const i=cars.indexOf(A);state.cplBroken.push(u);toast(`انقطعت الوصلة ${i+1}–${i+2}: الشد ${u.toFixed(1)} وقوتها ${TR.cpl}`,2500);return true}return false}
 function invI(c){const rb=c.rb;const R=new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(c.pivot.quaternion));return R.clone().multiply(new THREE.Matrix3().set(1/rb.Ib.x,0,0,0,1/rb.Ib.y,0,0,0,1/rb.Ib.z)).multiply(R.clone().transpose())}
-function trackPose(c){const front=at(c.sF),rear=at(c.sF-c.len);poseObj.position.copy(rear);poseObj.lookAt(front);c.pivot.quaternion.copy(poseObj.quaternion);c.pivot.position.copy(rear).lerp(front,0.5);c.pivot.position.y+=c.comY}
+function trackPose(c){const front=atL(c.sF),rear=atL(c.sF-c.len);poseObj.position.copy(rear);poseObj.lookAt(front);c.pivot.quaternion.copy(poseObj.quaternion);c.pivot.position.copy(rear).lerp(front,0.5);c.pivot.position.y+=c.comY}
 function cplPoint(c,front){return new THREE.Vector3(0,CPL_Y-c.comY,front?c.len/2+GAP/2:-c.len/2-GAP/2).applyQuaternion(c.pivot.quaternion).add(c.pivot.position)}
 function fwdOf(c){return new THREE.Vector3(0,0,1).applyQuaternion(c.pivot.quaternion)}
-function freeCar(c,vel,ang){c.onTrack=false;c.rb.vel.copy(vel);c.rb.ang.copy(ang);crashBang(c);impactSnd(0.7)}
+function freeCar(c,vel,ang){c.gs=c.sF-c.len/2;setGround(c);c.onTrack=false;c.rb.vel.copy(vel);c.rb.ang.copy(ang);crashBang(c);impactSnd(0.7)}
 let debris=[];
 function fxInit(c){c.spin=c.vT;c.odoC=state.odo;c.dets=[];c.dentM=[];c.g.traverse(o=>{if(o.userData.det)c.dets.push(o);if(o.userData.dent)c.dentM.push(o)});
+ if(!c.update){const bg=(c.g.userData.bogies||[]).map(b=>b.g);const sz=new THREE.Vector3();c.g.traverse(o=>{if(!o.isMesh||o.userData.det||o.userData.dent||o.userData.r||c.dets.length>=26)return;
+  for(let q=o.parent;q&&q!==c.g;q=q.parent){if(q.userData.r||bg.includes(q))return}if(!o.geometry.boundingBox)o.geometry.computeBoundingBox();o.geometry.boundingBox.getSize(sz);sz.multiply(o.scale);
+  if(Math.max(sz.x,sz.y,sz.z)<1.7&&o.geometry.attributes.position.count<700)c.dets.push(o)})}
  c.bog=(c.g.userData.bogies||[]).concat(c.g.userData.pony?[c.g.userData.pony]:[]).map(b=>({g:b.g,y:b.g.rotation.y,vy:0,x:0,vx:0}))}
 function detach(c,o,k){const home={parent:o.parent,pos:o.position.clone(),quat:o.quaternion.clone(),scl:o.scale.clone()};sc.attach(o);
- const vel=c.rb.vel.clone().multiplyScalar(0.8).add(new THREE.Vector3((rnd()-.5)*2*k,0.5+rnd()*1.5*k,(rnd()-.5)*2*k));debris.push({o,home,vel,ang:new THREE.Vector3((rnd()-.5)*6,(rnd()-.5)*6,(rnd()-.5)*6),gy:c.base})}
+ const hvy=o.userData.heavy||o.userData.bogie;const vel=c.rb.vel.clone().multiplyScalar(hvy?0.45:0.65);vel.y=Math.min(vel.y,0)+(hvy?0:0.3+rnd()*0.8*k);vel.x+=(rnd()-.5)*1.5*k;vel.z+=(rnd()-.5)*1.5*k;debris.push({o,home,vel,ang:new THREE.Vector3((rnd()-.5)*6,(rnd()-.5)*6,(rnd()-.5)*6),gy:c.base})}
 function crashFx(c,r,k){
- if(k>0.3)for(let i=c.dets.length-1;i>=0;i--)if(rnd()<0.3*(k-0.25)){detach(c,c.dets[i],k);c.dets.splice(i,1)}
- if(k>0.8)for(let i=c.bog.length-1;i>=0;i--)if(rnd()<0.15*k){detach(c,c.bog[i].g,k);c.bog.splice(i,1)}
+ if(k>0.2)for(let i=c.dets.length-1;i>=0;i--){const hv=c.dets[i].userData.heavy;if(hv&&k<0.75)continue;if(rnd()<(hv?0.3:0.55)*(k-0.12)){detach(c,c.dets[i],k);c.dets.splice(i,1)}}
+ if(k>0.6)for(let i=c.bog.length-1;i>=0;i--)if(rnd()<0.25*k){detach(c,c.bog[i].g,k);c.bog.splice(i,1)}
  if(!r||!c.dentM.length)return;
- const lp=new THREE.Vector3((rnd()-.5)*2*c.half.x,-c.half.y*0.6,(rnd()-.5)*2*c.half.z).applyQuaternion(c.pivot.quaternion).add(c.pivot.position);
- for(const m of c.dentM){const pa=m.geometry.attributes.position;if(!m.userData.orig)m.userData.orig=pa.array.slice();m.updateMatrixWorld();const L=m.worldToLocal(lp.clone());const R=1.5,f0=k*0.38;let hit=false;
-  for(let i=0;i<pa.count;i++){const dx=pa.getX(i)-L.x,dy=pa.getY(i)-L.y,dz=pa.getZ(i)-L.z;const d=Math.sqrt(dx*dx+dy*dy+dz*dz);if(d<R){const f=f0*(1-d/R)**2;const vx=-pa.getX(i),vy=1.7-pa.getY(i);const n=Math.hypot(vx,vy)||1;pa.setXY(i,pa.getX(i)+vx/n*f,pa.getY(i)+vy/n*f);hit=true}}
-  if(hit){pa.needsUpdate=true;m.geometry.computeVertexNormals()}}}
+ for(let t=0;t<2;t++){const lp=r.clone().multiplyScalar(0.9).add(c.pivot.position).addScaledVector(fwdOf(c),(rnd()-.5)*1.7*c.half.z);
+ if(k>0.35)for(let q=0;q<10;q++)emit(glassP,lp,new THREE.Vector3((rnd()-.5)*5,1.5+rnd()*3,(rnd()-.5)*5).addScaledVector(c.rb.vel,0.3),0.6+rnd()*0.6,0.18,0.06);
+ for(const m of c.dentM){const pa=m.geometry.attributes.position,ca=m.geometry.attributes.color;if(!m.userData.orig){m.userData.orig=pa.array.slice();if(ca)m.userData.origC=ca.array.slice()}m.updateMatrixWorld();const L=m.worldToLocal(lp.clone());const R=2.3,f0=Math.min(1.0,k*0.9);let hit=false;
+  for(let i=0;i<pa.count;i++){const dx=pa.getX(i)-L.x,dy=pa.getY(i)-L.y,dz=pa.getZ(i)-L.z;const d=Math.sqrt(dx*dx+dy*dy+dz*dz);if(d<R){const w=(1-d/R);const f=f0*w*w*(0.55+0.9*rnd());const vx=-pa.getX(i),vy=1.7-pa.getY(i);const n=Math.hypot(vx,vy)||1;
+   pa.setXYZ(i,pa.getX(i)+vx/n*f+(rnd()-.5)*0.06*w,pa.getY(i)+vy/n*f+(rnd()-.5)*0.06*w,pa.getZ(i)+(rnd()-.5)*0.08*w);
+   if(ca){const sc=Math.min(0.85,w*1.1*Math.min(1,k*1.6));ca.setXYZ(i,lerp(ca.getX(i),0.2,sc),lerp(ca.getY(i),0.19,sc),lerp(ca.getZ(i),0.18,sc))}hit=true}}
+  if(hit){pa.needsUpdate=true;if(ca)ca.needsUpdate=true;m.geometry.computeVertexNormals()}}}}
 const _m4=new THREE.Matrix4(),_r4=new THREE.Matrix4(),_t4=new THREE.Matrix4();
 function setPart(q,M){q.ref.im.setMatrixAt(q.ref.i,M);q.ref.im.instanceMatrix.needsUpdate=true}
 function breakObs(o,v){o.broken=true;BROKEN.push(o);const sp=Math.hypot(v.x,v.z)||1;
@@ -850,16 +898,16 @@ function obsAnimate(dt){for(const o of BROKEN){if(!o.fall||o.fall.t>1.4)continue
  if(o.fall.t>1.0&&!o.fall.thud){o.fall.thud=1;impactSnd(o.type==='pole'?0.8:0.5)}}}
 function obsRestore(){for(const o of BROKEN){o.broken=false;o.fall=null;for(const q of o.parts)setPart(q,q.M0)}BROKEN=[]}
 // cars push each other apart instead of passing through (2D boxes in plan view)
-function carCollide(dt){const n=cars.length;const info=cars.map(c=>{const f=fwdOf(c);f.y=0;if(f.lengthSq()<1e-6)f.set(0,0,1);f.normalize();return{c,f,r:new THREE.Vector3(f.z,0,-f.x),p:c.pivot.position,hx:c.half.x,hz:Math.max(1,c.half.z-0.9)}});
+function carCollide(dt){const all=cars.concat(AICR);const n=all.length;const info=all.map(c=>{const f=fwdOf(c);f.y=0;if(f.lengthSq()<1e-6)f.set(0,0,1);f.normalize();return{c,f,r:new THREE.Vector3(f.z,0,-f.x),p:c.pivot.position,hx:c.half.x,hz:Math.max(1,c.half.z-0.9)}});
  for(let a=0;a<n;a++)for(let b=a+1;b<n;b++){const A=info[a],B=info[b];if(A.c.onTrack&&B.c.onTrack)continue;const dx=B.p.x-A.p.x,dz=B.p.z-A.p.z;if(dx*dx+dz*dz>(A.hz+B.hz+4)**2)continue;
   if(Math.abs(A.p.y-B.p.y)>A.c.half.y+B.c.half.y)continue;let best=1e9,nx=0,nz=0;
   for(const ax of[A.f,A.r,B.f,B.r]){const pa=Math.abs(A.f.x*ax.x+A.f.z*ax.z)*A.hz+Math.abs(A.r.x*ax.x+A.r.z*ax.z)*A.hx,pb=Math.abs(B.f.x*ax.x+B.f.z*ax.z)*B.hz+Math.abs(B.r.x*ax.x+B.r.z*ax.z)*B.hx;const d=dx*ax.x+dz*ax.z;const ov=pa+pb-Math.abs(d);if(ov<=0){best=-1;break}if(ov<best){best=ov;const sg=d<0?-1:1;nx=ax.x*sg;nz=ax.z*sg}}
   if(best<=0)continue;const ca=A.c,cb=B.c;const fa=ca.onTrack?0:cb.onTrack?1:0.5,fb=cb.onTrack?0:ca.onTrack?1:0.5;
   ca.pivot.position.x-=nx*best*fa;ca.pivot.position.z-=nz*best*fa;cb.pivot.position.x+=nx*best*fb;cb.pivot.position.z+=nz*best*fb;
   const vr=(cb.rb.vel.x-ca.rb.vel.x)*nx+(cb.rb.vel.z-ca.rb.vel.z)*nz;if(vr<0){const j=-1.2*vr;if(!ca.onTrack){ca.rb.vel.x-=nx*j*fa;ca.rb.vel.z-=nz*j*fa}if(!cb.onTrack){cb.rb.vel.x+=nx*j*fb;cb.rb.vel.z+=nz*j*fb}
-   if(-vr>3&&(ca.ccd||0)<=0){impactSnd(Math.min(1,-vr/12));ca.ccd=0.4}}}
- for(const c of cars)c.ccd=(c.ccd||0)-dt}
-function hitObstacles(c,dt){c.obsCd=(c.obsCd||0)-dt;const P=c.pivot.position;const f=fwdOf(c);f.y=0;if(f.lengthSq()<1e-6)return;f.normalize();const hl=c.half.z,hw=c.half.x,v=c.rb.vel,massF=(TR.mass/cars.length)/40000;
+   if(-vr>3&&(ca.ccd||0)<=0){impactSnd(Math.min(1,-vr/12));ca.ccd=0.4;const kk=Math.min(1,-vr/14);const nn=new THREE.Vector3(nx,0,nz);crashFx(ca,nn.clone().multiplyScalar(ca.half.x),kk);crashFx(cb,nn.clone().multiplyScalar(-cb.half.x),kk)}}}
+ for(const c of all)c.ccd=(c.ccd||0)-dt}
+function hitObstacles(c,dt){if(!c.pivot)return;c.obsCd=(c.obsCd||0)-dt;const P=c.pivot.position;const f=fwdOf(c);f.y=0;if(f.lengthSq()<1e-6)return;f.normalize();const hl=c.half.z,hw=c.half.x,v=c.rb.vel,massF=(TR.mass/cars.length)/40000;
  for(const o of obsNear(P.x,P.z,hl+8)){if(o.broken)continue;if(P.y-c.half.y*1.3>o.base.y+o.h)continue;let n=null,pen=0;
   if(o.shape==='box'){const cs=Math.cos(o.yaw),sn=Math.sin(o.yaw);for(let t=-1;t<=1;t+=0.5){const qx=P.x+f.x*hl*t-o.x,qz=P.z+f.z*hl*t-o.z;const lx=qx*cs-qz*sn,lz=qx*sn+qz*cs;const px=o.hw+hw-Math.abs(lx),pz=o.hd+hw-Math.abs(lz);
     if(px>0&&pz>0){const pp=Math.min(px,pz);if(pp>pen){pen=pp;const nlx=px<pz?Math.sign(lx):0,nlz=px<pz?0:Math.sign(lz);n=new THREE.Vector3(nlx*cs+nlz*sn,0,-nlx*sn+nlz*cs)}}}}
@@ -868,18 +916,18 @@ function hitObstacles(c,dt){c.obsCd=(c.obsCd||0)-dt;const P=c.pivot.position;con
   if(o.S===0){breakObs(o,v);continue}
   if(I>o.S){breakObs(o,v);const keep=Math.max(0.35,1-o.S/(I*1.6));v.x*=keep;v.z*=keep;if(o.type!=='tree')impactSnd(Math.min(1,0.3+o.S/40));toast(`${o.type==='pole'?'انكسر عمود':o.type==='rock'?'تكسرت صخرة':'انكسرت شجرة'} (الضربة ${I.toFixed(0)}، قوته ${o.S.toFixed(0)})`,1600);continue}
   if(vn>0){v.x+=n.x*vn*1.25;v.z+=n.z*vn*1.25}P.x+=n.x*pen*0.6;P.z+=n.z*pen*0.6;c.rb.ang.multiplyScalar(0.85);
-  if(vn>2&&c.obsCd<=0){impactSnd(Math.min(1,vn/10));c.obsCd=0.5;const lbl=o.type==='building'?'مبنى':o.type==='pole'?'عمود':o.type==='rock'?'صخرة':'شجرة';toast(`العربة صدمت ${lbl} و${o.S===Infinity?'ارتدّت':'وقفت'} (الضربة ${I.toFixed(0)}${o.S===Infinity?'':'، قوته '+o.S.toFixed(0)})`,1600)}}}
-function crashVisuals(dt){obsAnimate(dt);for(const c of cars){
+  if(vn>2&&c.obsCd<=0){impactSnd(Math.min(1,vn/10));c.obsCd=0.5;crashFx(c,n.clone().multiplyScalar(-c.half.x),Math.min(1,vn/12));const lbl=o.type==='building'?'مبنى':o.type==='pole'?'عمود':o.type==='rock'?'صخرة':'شجرة';toast(`العربة صدمت ${lbl} و${o.S===Infinity?'ارتدّت':'وقفت'} (الضربة ${I.toFixed(0)}${o.S===Infinity?'':'، قوته '+o.S.toFixed(0)})`,1600)}}}
+function crashVisuals(dt){obsAnimate(dt);for(const c of cars.concat(AICR)){
   c.spin*=Math.exp(-(c.onTrack?0.15:0.5)*dt);if(!c.onTrack&&c.slideNow)c.spin=Math.max(c.spin,c.slideNow*0.6);if(c.onTrack)c.spin=c.vT;c.odoC+=c.spin*dt;
   for(const w of c.wheels)if(w.parent)w.rotation.x=c.odoC/w.userData.r;if(c.update)c.update(c.odoC);
   if(!c.onTrack)for(const b of c.bog){const kick=c.slideNow?(rnd()-.5)*Math.min(6,c.slideNow)*0.6:0;b.vy+=(-22*(b.y-0)-2.2*b.vy)*dt+kick*dt*8+c.rb.ang.y*dt*3;b.vx+=(-30*b.x-2.5*b.vx)*dt+(rnd()-.5)*kick*dt*4;
    b.y=clamp(b.y+b.vy*dt,-0.75,0.75);b.x=clamp(b.x+b.vx*dt,-0.28,0.28);b.g.rotation.set(0,b.y,b.x)}}
  for(const d of debris){d.vel.y-=9.81*dt;d.o.position.addScaledVector(d.vel,dt);const w=d.ang.length();if(w>1e-4){tmpQ.setFromAxisAngle(tmpV.copy(d.ang).divideScalar(w),w*dt);d.o.quaternion.premultiply(tmpQ)}
-  d.gy=groundH(d.o.position.x,d.o.position.z);if(d.o.position.y<d.gy+0.2){d.o.position.y=d.gy+0.2;d.vel.y=Math.abs(d.vel.y)*0.3;d.vel.x*=0.75;d.vel.z*=0.75;d.ang.multiplyScalar(0.7)}}}
+  d.gy=groundH(d.o.position.x,d.o.position.z);if(d.vel.y>2)d.vel.y=2;if(d.o.position.y<d.gy+0.2){d.o.position.y=d.gy+0.2;{const X=d.o.position.x,Z=d.o.position.z,hx=groundH(X+1.5,Z),hz=groundH(X,Z+1.5);const n=new THREE.Vector3(-(hx-d.gy)/1.5,1,-(hz-d.gy)/1.5).normalize();const vn=d.vel.dot(n);if(vn<0)d.vel.addScaledVector(n,-vn*1.2)}d.vel.y=Math.min(d.vel.y,1);const hv=Math.hypot(d.vel.x,d.vel.z);if(hv>1e-3){const kk=Math.max(0,hv-8*dt)/hv;d.vel.x*=kk;d.vel.z*=kk}d.ang.multiplyScalar(Math.max(0,1-3*dt))}}}
 function fxRestore(){obsRestore();for(const d of debris){d.home.parent.add(d.o);d.o.position.copy(d.home.pos);d.o.quaternion.copy(d.home.quat);d.o.scale.copy(d.home.scl)}debris=[];
- for(const c of cars){c.g.traverse(o=>{if(o.userData.orig){const pa=o.geometry.attributes.position;pa.array.set(o.userData.orig);pa.needsUpdate=true;o.geometry.computeVertexNormals();delete o.userData.orig}});(c.g.userData.bogies||[]).concat(c.g.userData.pony?[c.g.userData.pony]:[]).forEach(b=>b.g.rotation.set(0,0,0))}}
+ for(const c of cars){c.g.traverse(o=>{if(o.userData.orig){const pa=o.geometry.attributes.position;pa.array.set(o.userData.orig);pa.needsUpdate=true;if(o.userData.origC){const ca=o.geometry.attributes.color;ca.array.set(o.userData.origC);ca.needsUpdate=true;delete o.userData.origC}o.geometry.computeVertexNormals();delete o.userData.orig}});(c.g.userData.bogies||[]).concat(c.g.userData.pony?[c.g.userData.pony]:[]).forEach(b=>b.g.rotation.set(0,0,0))}}
 function crashBang(c){const p=c.pivot.position;for(let q=0;q<10;q++)emit(sparks,new THREE.Vector3(p.x,p.y-1.5,p.z),new THREE.Vector3((rnd()-.5)*6,2+rnd()*4,(rnd()-.5)*6),0.5+rnd()*0.4,0.35,0.1)}
-function startCrash(kind,why,firstIdx=0){if(state.mode!=='drive')return;state.cruise=null;uiCruise();state.mode='crash';state.crashT=0;state.crashWhy=why;crashSound();horn(false);document.body.classList.add('crashing');state.crashDist=45;state.crashPitch=0.2;state.userZoom=false;$('slow').style.display='block';$('cab').style.display='none';$('warn').style.display='none';loco.g.visible=true;
+function startCrash(kind,why,firstIdx=0,ai=null){if(state.mode!=='drive')return;state.cruise=null;uiCruise();state.mode='crash';state.crashT=0;state.crashWhy=why;crashSound();horn(false);document.body.classList.add('crashing');state.crashDist=45;state.crashPitch=0.2;state.userZoom=false;$('slow').style.display='block';$('cab').style.display='none';$('warn').style.display='none';loco.g.visible=true;
  const s=state.s,v=state.v;placeTrain(s);
  cars.forEach(c=>{const com=new THREE.Vector3(0,c.comY,c.len/2);const pivot=new THREE.Object3D();c.g.updateMatrixWorld();pivot.position.copy(c.g.localToWorld(com.clone()));pivot.quaternion.copy(c.g.quaternion);sc.add(pivot);pivot.attach(c.g);c.pivot=pivot;
   const h=c.half;c.onTrack=true;c.sF=s-c.frontOff;c.vT=v;c.gs=c.sF-c.len/2;setGround(c);fxInit(c);c.broken=false;c.sideDone=false;c.cf=0;c.rb={vel:fwd(c.sF-c.len/2).multiplyScalar(v),ang:new THREE.Vector3(),Ib:new THREE.Vector3(((2*h.y)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.y)**2)/12)}});
@@ -887,26 +935,28 @@ function startCrash(kind,why,firstIdx=0){if(state.mode!=='drive')return;state.cr
  if(kind==='curve'){const dirK=Math.sign(K[clamp(Math.round(cs),0,TOTAL)])||1;const out=sv.clone().multiplyScalar(-dirK);
   freeCar(c,f.clone().multiplyScalar(v).addScaledVector(out,v*0.14).setY(1.0),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()).addScaledVector(UP,-0.25*dirK))}
  else{freeCar(c,f.clone().multiplyScalar(v*0.12).setY(1.8),sv.clone().multiplyScalar(-0.7).addScaledVector(UP,(rnd()-.5)*0.6))}
- state.crashKind=kind;{const kk=Math.abs(K[clamp(Math.round(cars[firstIdx].sF-cars[firstIdx].len/2),0,TOTAL)]);state.sharpCrash=kind==='curve'&&kk>1/200}state.crashV0=v;state.cplMax=0;state.cplBroken=[];state.v=0;state.force=0;state.crashCenter=c.pivot.position.clone();state.crashAng=Math.atan2(cam.position.x-state.crashCenter.x,cam.position.z-state.crashCenter.z)}
+ state.crashKind=kind;{const kk=Math.abs(K[clamp(Math.round(cars[firstIdx].sF-cars[firstIdx].len/2),0,TOTAL)]);state.sharpCrash=kind==='curve'&&kk>1/200}state.crashV0=Math.max(v,ai?ai.v:0);if(ai){AIS=AIS.filter(x=>x!==ai);AICR=ai.list;const dv=fwd(ai.sF).multiplyScalar(-1);AICR.forEach((c,i)=>{const com=new THREE.Vector3(0,c.comY,c.len/2);const pivot=new THREE.Object3D();c.g.updateMatrixWorld();pivot.position.copy(c.g.localToWorld(com.clone()));pivot.quaternion.copy(c.g.quaternion);sc.add(pivot);pivot.attach(c.g);c.pivot=pivot;const h=c.half;c.onTrack=false;c.vT=ai.v;c.gs=ai.sF+c.frontOff+c.len/2;c.sF=c.gs;setGround(c);fxInit(c);c.broken=false;c.cf=0;c.rb={vel:dv.clone().multiplyScalar(ai.v*(i?1:0.15)).setY(i?0.3:1.8),ang:new THREE.Vector3((rnd()-.5)*0.6,(rnd()-.5)*0.6,(rnd()-.5)*0.6),Ib:new THREE.Vector3(((2*h.y)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.y)**2)/12)}});impactSnd(1);impactSnd(1)}state.cplMax=0;state.cplBroken=[];state.v=0;state.force=0;state.crashCenter=c.pivot.position.clone();state.crashAng=Math.atan2(cam.position.x-state.crashCenter.x,cam.position.z-state.crashCenter.z)}
 const corners=[];for(const x of[-1,1])for(const y of[-1,1])for(const z of[-1,1])corners.push(new THREE.Vector3(x,y,z));
-function setGround(c){c.tp=at(c.gs);c.sv=sideV(c.gs);c.base=MP.elev?elevAt(c.gs):0;c.gfar=groundH(c.pivot.position.x,c.pivot.position.z)}
+function setGround(c){c.tp=c.laneFix!==undefined?at(c.gs,c.laneFix):atL(c.gs);c.sv=sideV(c.gs);c.base=MP.elev?elevAt(c.gs):0;c.gfar=groundH(c.pivot.position.x,c.pivot.position.z)}
 // ground under a point: rail tops and the gravel bed by the track, natural ground further out
-function groundUnder(c,wp){const off=Math.abs((wp.x-c.tp.x)*c.sv.x+(wp.z-c.tp.z)*c.sv.z);if(off<1.0)return c.base+0.9;if(off<3.4)return c.base+0.55*Math.min(1,(3.4-off)/1.3);return off<14?c.base:groundH(wp.x,wp.z)}
-function rbStep(c,dt){const rb=c.rb,p=c.pivot;c.impCd=(c.impCd||0)-dt;
+function groundUnder(c,wp){const off=Math.abs((wp.x-c.tp.x)*c.sv.x+(wp.z-c.tp.z)*c.sv.z);if(off<1.0)return c.base+0.9;if(off<3.4)return c.base+0.55*Math.min(1,(3.4-off)/1.3);let g=groundH(wp.x,wp.z);if(MP.elev){const emb=off<12?c.base-2.5*(off-3.4)/8.6:off<26?c.base-2.5-6.5*(off-12)/14:-1e9;g=Math.max(g,emb)}else if(off<14)g=Math.max(g,c.base);return g}
+// real slope of the ground under a point (flat on the track bed)
+function groundN(c,wp){const off=Math.abs((wp.x-c.tp.x)*c.sv.x+(wp.z-c.tp.z)*c.sv.z);if(off<14)return UP;const h0=groundH(wp.x,wp.z),hx=groundH(wp.x+1.5,wp.z),hz=groundH(wp.x,wp.z+1.5);return new THREE.Vector3(-(hx-h0)/1.5,1,-(hz-h0)/1.5).normalize()}
+function rbStep(c,dt){const rb=c.rb,p=c.pivot;if(!p||!rb)return;c.impCd=(c.impCd||0)-dt;
  rb.vel.y-=9.81*dt;p.position.addScaledVector(rb.vel,dt);const w=rb.ang.length();if(w>1e-5){tmpQ.setFromAxisAngle(tmpV.copy(rb.ang).divideScalar(w),w*dt);p.quaternion.premultiply(tmpQ).normalize()}
  const Iw=invI(c);let contact=false,low=null;
- for(const k of corners){const r=new THREE.Vector3(k.x*c.half.x,k.y*c.half.y,k.z*c.half.z).applyQuaternion(p.quaternion);const wp=r.clone().add(p.position);const gyc=groundUnder(c,wp);if(wp.y<gyc){contact=true;p.position.y-=(wp.y-gyc)*0.8;
-  const vc=rb.vel.clone().add(rb.ang.clone().cross(r));if(vc.y<-2.5&&c.impCd<=0){impactSnd(Math.min(1,-vc.y/9));crashFx(c,r,Math.min(1,-vc.y/9));c.impCd=0.4}if(vc.y<0){const rn=r.clone().cross(UP);const j=-1.25*vc.y/(1+rn.clone().applyMatrix3(Iw).dot(rn));rb.vel.addScaledVector(UP,j);rb.ang.add(rn.applyMatrix3(Iw).multiplyScalar(j));
-   const vt=vc.clone();vt.y=0;const vtl=vt.length();if(vtl>1e-3){const t=vt.divideScalar(vtl).negate();const rt=r.clone().cross(t);const jt=Math.min(0.55*j,vtl/(1+rt.clone().applyMatrix3(Iw).dot(rt)));rb.vel.addScaledVector(t,jt);rb.ang.add(rt.applyMatrix3(Iw).multiplyScalar(jt))}}
+ for(const k of corners){const r=new THREE.Vector3(k.x*c.half.x,k.y*c.half.y,k.z*c.half.z).applyQuaternion(p.quaternion);const wp=r.clone().add(p.position);const gyc=groundUnder(c,wp);if(wp.y<gyc){contact=true;const gn=groundN(c,wp);p.position.addScaledVector(gn,(gyc-wp.y)*gn.y*0.8);
+  const vc=rb.vel.clone().add(rb.ang.clone().cross(r));const vn=vc.dot(gn);if(vn<-2.5&&c.impCd<=0){impactSnd(Math.min(1,-vn/9));crashFx(c,r,Math.min(1,-vn/9));c.impCd=0.4}if(vn<0){const rn=r.clone().cross(gn);const j=-1.25*vn/(1+rn.clone().applyMatrix3(Iw).dot(rn));rb.vel.addScaledVector(gn,j);rb.ang.add(rn.applyMatrix3(Iw).multiplyScalar(j));
+   const vt=vc.clone().addScaledVector(gn,-vn);const vtl=vt.length();if(vtl>1e-3){const t=vt.divideScalar(vtl).negate();const rt=r.clone().cross(t);const jt=Math.min(0.55*j,vtl/(1+rt.clone().applyMatrix3(Iw).dot(rt)));rb.vel.addScaledVector(t,jt);rb.ang.add(rt.applyMatrix3(Iw).multiplyScalar(jt))}}
   if(!low||wp.y<low.y)low=wp}}
- if(contact){const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>1e-3){const k=Math.max(0,hv-6.5*dt)/hv;rb.vel.x*=k;rb.vel.z*=k}rb.ang.multiplyScalar(Math.max(0,1-1.5*dt))}c.slideNow=contact?Math.hypot(rb.vel.x,rb.vel.z):0;rb.ang.multiplyScalar(1-(contact?0.8:0.05)*dt);{const lim=state.crashV0+2;const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>lim){rb.vel.x*=lim/hv;rb.vel.z*=lim/hv}if(rb.vel.y>5)rb.vel.y=5;const w2=rb.ang.length();if(w2>2.2)rb.ang.multiplyScalar(2.2/w2)}const hs=Math.hypot(rb.vel.x,rb.vel.z);
+ if(contact){const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>1e-3){const k=Math.max(0,hv-6.5*dt)/hv;rb.vel.x*=k;rb.vel.z*=k}rb.ang.multiplyScalar(Math.max(0,1-1.5*dt))}c.slideNow=contact?Math.hypot(rb.vel.x,rb.vel.z):0;rb.ang.multiplyScalar(1-(contact?0.8:0.05)*dt);{const lim=state.crashV0+2;const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>lim){rb.vel.x*=lim/hv;rb.vel.z*=lim/hv}if(rb.vel.y>3)rb.vel.y=3;const w2=rb.ang.length();if(w2>2.2)rb.ang.multiplyScalar(2.2/w2)}const hs=Math.hypot(rb.vel.x,rb.vel.z);
  if(contact)state.slide+=hs;if(contact&&low&&hs>2&&rnd()<0.5){emit(dust,low.clone().add(new THREE.Vector3((rnd()-.5)*3,0.3,(rnd()-.5)*3)),new THREE.Vector3((rnd()-.5)*4,1.5+rnd()*3,(rnd()-.5)*4).addScaledVector(rb.vel,0.2),2.5+rnd()*2,3,12+rnd()*8);
   if(hs>8&&rnd()<.5)for(let q=0;q<3;q++)emit(sparks,low,new THREE.Vector3((rnd()-.5)*8,2+rnd()*5,(rnd()-.5)*8).addScaledVector(rb.vel,0.5),0.4+rnd()*0.5,0.35,0.1)}}
 // coupler between A (ahead) and B (behind)
 function couple(A,B,dt,idx){if(A.broken||(A.onTrack&&B.onTrack))return;
  const pa=cplPoint(A,false),pb=cplPoint(B,true);const d=pb.clone().sub(pa);const dist=d.length();
  if(A.onTrack!==B.onTrack){const on=A.onTrack?A:B;const comp=pa.clone().sub(pb).dot(fwdOf(B));
-  const frP=A.onTrack?pb:pa,sc=A.onTrack?A.sF-A.len-GAP/2:B.sF+GAP/2;const lat=Math.abs(frP.clone().sub(at(sc)).dot(sideV(sc)));
+  const frP=A.onTrack?pb:pa,sc=A.onTrack?A.sF-A.len-GAP/2:B.sF+GAP/2;const lat=Math.abs(frP.clone().sub(atL(sc)).dot(sideV(sc)));
   let pullOff=false;if(on.vT>3&&comp<-0.35){const fr0=A.onTrack?B:A;const tf=fwd(on.sF-on.len/2);const vf=fr0.rb.vel.x*tf.x+fr0.rb.vel.z*tf.z;const L=Math.abs(on.vT-vf)*0.35;if(L>state.cplMax)state.cplMax=L;
    if(L>RAIL_HOLD*(state.sharpCrash?2:1))pullOff=true;else{const nv=Math.max(0,(on.vT+vf)/2);fr0.rb.vel.addScaledVector(tf,nv-vf);for(const c of cars)if(c.onTrack)c.vT=Math.min(c.vT,nv+0.3);if(L>2&&(on.ccd||0)<=0){impactSnd(Math.min(1,L/12));on.ccd=0.5}}}
   else if(!A.sideDone&&(lat>1.0||dist>1.5)){A.sideDone=true;const L=on.vT*0.35;if(L>state.cplMax)state.cplMax=L;
@@ -928,23 +978,23 @@ function couple(A,B,dt,idx){if(A.broken||(A.onTrack&&B.onTrack))return;
  const lam=Math.max(-4,(-Math.min(3,0.3*(dist-SLACK)/dt)-vn)/k);if(lam>0)return;if(cplLoad(A,vn))return;
  B.rb.vel.addScaledVector(n,lam);B.rb.ang.add(rBn.applyMatrix3(IB).multiplyScalar(lam));A.rb.vel.addScaledVector(n,-lam);A.rb.ang.add(rAn.applyMatrix3(IA).multiplyScalar(-lam))}
 function crashUpdate(dt){const slow=state.crashT<6?0.35:1;const sdt=dt*slow;state.crashT+=dt;const N=8,h=sdt/N;
- state.slide=0;sndBudget=0;for(const c of cars){if(!c.onTrack&&c.pivot){const P=c.pivot.position;let bs=c.gs,bd=1e9;for(let q=c.gs-80;q<=c.gs+80;q+=4){const a=at(q);const dd=(a.x-P.x)**2+(a.z-P.z)**2;if(dd<bd){bd=dd;bs=q}}c.gs=bs;setGround(c)}}
- for(let i=0;i<N;i++){const offFrac=cars.filter(c=>!c.onTrack).length/cars.length;const dec=(state.sharpCrash?1.2:0.6)+7*offFrac;for(const c of cars){if(c.onTrack){c.vT=Math.max(0,c.vT-dec*h);c.sF+=c.vT*h;trackPose(c);{const cs=c.sF-c.len/2,kk=K[clamp(Math.round(cs),0,TOTAL)];if(state.sharpCrash&&kk&&c.vT*c.vT*Math.abs(kk)>TR.derail*2.5){const out=sideV(cs).multiplyScalar(-Math.sign(kk));freeCar(c,fwd(cs).multiplyScalar(c.vT).addScaledVector(out,c.vT*0.14).setY(1.0),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()));c.rb.ang.y-=0.25*Math.sign(kk);continue}}c.rb.vel.copy(fwd(c.sF-c.len/2)).multiplyScalar(c.vT)}else{rbStep(c,h);hitObstacles(c,h)}}
-  for(let it=0;it<2;it++)for(let j=1;j<cars.length;j++)couple(cars[j-1],cars[j],h,j);carCollide(h)}
+ state.slide=0;sndBudget=0;for(const c of cars.concat(AICR)){if(!c.onTrack&&c.pivot){const P=c.pivot.position;let bs=c.gs,bd=1e9;for(let q=c.gs-80;q<=c.gs+80;q+=4){const a=at(q);const dd=(a.x-P.x)**2+(a.z-P.z)**2;if(dd<bd){bd=dd;bs=q}}c.gs=bs;setGround(c)}}
+ for(let i=0;i<N;i++){const offFrac=cars.filter(c=>!c.onTrack).length/cars.length;const dec=(state.sharpCrash?1.2:0.6)+7*offFrac;for(const c of cars){if(c.onTrack){c.vT=Math.max(0,c.vT-dec*h);c.sF+=c.vT*h;c.gs=c.sF-c.len/2;trackPose(c);{const cs=c.sF-c.len/2,kk=K[clamp(Math.round(cs),0,TOTAL)];if(state.sharpCrash&&kk&&c.vT*c.vT*Math.abs(kk)>TR.derail*2.5){const out=sideV(cs).multiplyScalar(-Math.sign(kk));freeCar(c,fwd(cs).multiplyScalar(c.vT).addScaledVector(out,c.vT*0.14).setY(1.0),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()));c.rb.ang.y-=0.25*Math.sign(kk);continue}}c.rb.vel.copy(fwd(c.sF-c.len/2)).multiplyScalar(c.vT)}else{rbStep(c,h);hitObstacles(c,h)}}
+  for(const c of AICR){rbStep(c,h);hitObstacles(c,h)}for(let it=0;it<2;it++)for(let j=1;j<cars.length;j++)couple(cars[j-1],cars[j],h,j);carCollide(h)}
  if(AC){const t=AC.currentTime,sl=state.slide/N;au.sg.gain.setTargetAtTime(Math.min(0.45,sl/70),t,.08);au.sf.frequency.setTargetAtTime(700+Math.min(sl,200)*9,t,.1);au.rgc.gain.setTargetAtTime(Math.min(0.7,sl/40),t,.1)}
- crashVisuals(sdt);updParticles(dust,sdt,-0.25,0.6,0.55);updParticles(sparks,sdt,9.8,0.5,1);updParticles(smoke,sdt,-0.6,0.5,0.4);updParticles(steamP,sdt,-0.3,1.2,0.6);
+ crashVisuals(sdt);updParticles(glassP,sdt,9.8,0.3,1);updParticles(dust,sdt,-0.25,0.6,0.55);updParticles(sparks,sdt,9.8,0.5,1);updParticles(smoke,sdt,-0.6,0.5,0.4);updParticles(steamP,sdt,-0.3,1.2,0.6);
  const tgt=new THREE.Vector3();let n=0;const p0=cars[0].pivot.position;for(const c of cars.slice(0,5))if(c.pivot.position.distanceTo(p0)<250){tgt.add(c.pivot.position);n++}tgt.divideScalar(Math.max(n,1));state.crashCenter.lerp(tgt,Math.min(1,dt*1.5));
  if(!state.dragging)state.crashAng+=dt*0.15;if(!state.userZoom)state.crashDist=Math.min(state.crashDist+dt*2.5,90);const rad=state.crashDist*Math.cos(state.crashPitch);cam.position.set(state.crashCenter.x+Math.sin(state.crashAng)*rad,state.crashCenter.y+state.crashDist*Math.sin(state.crashPitch),state.crashCenter.z+Math.cos(state.crashAng)*rad);{const cp=cam.position;for(const o of obsNear(cp.x,cp.z,6)){if(o.shape!=='box')continue;const cs=Math.cos(o.yaw),sn=Math.sin(o.yaw),qx=cp.x-o.x,qz=cp.z-o.z;if(Math.abs(qx*cs-qz*sn)<o.hw+3&&Math.abs(qx*sn+qz*cs)<o.hd+3)cp.y=Math.max(cp.y,o.base.y+o.h+6)}}cam.lookAt(state.crashCenter.x,state.crashCenter.y-1,state.crashCenter.z);cam.fov=50;cam.updateProjectionMatrix();
  if(state.crashT>2.5&&$('crashOv').hidden){const nb=state.cplBroken.length;$('crashWhy').textContent=state.crashWhy+` أقوى شد على الوصلات كان ${state.cplMax.toFixed(1)}، وقوة الوصلة ${TR.cpl}. `+(nb?`انقطعت ${nb===1?'وصلة وحدة':nb===2?'وصلتين':nb+' وصلات'}.`:'ما انقطعت ولا وصلة.');$('crashOv').hidden=false}if(state.crashT>6.5)$('slow').style.display='none'}
-function clearCrash(){fxRestore();document.body.classList.remove('crashing');$('crashWhy').hidden=true;if(AC){const t=AC.currentTime;au.sg.gain.setTargetAtTime(0,t,.1);au.rgc.gain.setTargetAtTime(0,t,.1)}for(const c of cars){if(c.pivot){sc.attach(c.g);sc.remove(c.pivot);c.pivot=null}}clearParticles();$('slow').style.display='none'}
+function clearCrash(){fxRestore();for(const c of AICR)sc.remove(c.pivot||c.g);AICR=[];document.body.classList.remove('crashing');$('crashWhy').hidden=true;if(AC){const t=AC.currentTime;au.sg.gain.setTargetAtTime(0,t,.1);au.rgc.gain.setTargetAtTime(0,t,.1)}for(const c of cars){if(c.pivot){sc.attach(c.g);sc.remove(c.pivot);c.pivot=null}}clearParticles();$('slow').style.display='none'}
 
 /* ================= cameras ================= */
 const CAMS=['الكابينة','حرة','جنب السكة','طيران حر'];const flyKeys=new Set();
 function updateCamera(dt){const s=state.s,cfg=TR.cab;loco.g.visible=!(state.camMode===0&&cfg.hide);$('cab').style.display=state.camMode===0&&cfg.hide?'block':'none';$('hint').hidden=state.camMode===2||state.mode!=='drive'||state.cruise!=null;$('hint').textContent=state.camMode===3?'W A S D للحركة، Q و E تحت وفوق، Shift أسرع، والعجلة للسرعة':'اسحب على الشاشة عشان تلف الكاميرا';
- if(state.camMode===0){const p=at(s-cfg.back,cfg.x,cfg.y);cam.position.copy(p);const h=headingAt(s)+state.look.yaw,pt=state.look.pitch-0.04;cam.lookAt(p.x+Math.sin(h)*Math.cos(pt)*50,p.y+Math.sin(pt)*50,p.z+Math.cos(h)*Math.cos(pt)*50);cam.rotateZ(cantAt(s));cam.fov=62}
- else if(state.camMode===1){const o=state.orbit;if(state.mode==='menu'&&!state.dragging)o.yaw+=dt*0.08;const tg=at(s-7,0,2.4);const h=headingAt(s)+o.yaw;
+ if(state.camMode===0){const p=at(s-cfg.back,cfg.x+laneOff(s-cfg.back),cfg.y);cam.position.copy(p);const h=headingAt(s)+state.look.yaw,pt=state.look.pitch-0.04;cam.lookAt(p.x+Math.sin(h)*Math.cos(pt)*50,p.y+Math.sin(pt)*50,p.z+Math.cos(h)*Math.cos(pt)*50);cam.rotateZ(cantAt(s));cam.fov=62}
+ else if(state.camMode===1){const o=state.orbit;if(state.mode==='menu'&&!state.dragging)o.yaw+=dt*0.08;const tg=atL(s-7,2.4);const h=headingAt(s)+o.yaw;
   cam.position.set(tg.x+Math.sin(h)*Math.cos(o.pitch)*o.dist,tg.y+Math.sin(o.pitch)*o.dist,tg.z+Math.cos(h)*Math.cos(o.pitch)*o.dist);if(cam.position.y<tg.y-1.4)cam.position.y=tg.y-1.4;cam.lookAt(tg);cam.fov=50}
- else{if(!state.sideCam||s>state.sideCam.s+40||s<state.sideCam.s-900){const cs=Math.min(s+180+rnd()*120,TOTAL-30);state.sideCam={s:cs,p:at(cs,(rnd()<.5?-1:1)*(10+rnd()*8),1.6+rnd()*2)}}cam.position.copy(state.sideCam.p);cam.lookAt(at(s-8,0,2.4));cam.fov=34}
+ else{if(!state.sideCam||s>state.sideCam.s+40||s<state.sideCam.s-900){const cs=Math.min(s+180+rnd()*120,TOTAL-30);state.sideCam={s:cs,p:at(cs,(rnd()<.5?-1:1)*(10+rnd()*8),1.6+rnd()*2)}}cam.position.copy(state.sideCam.p);cam.lookAt(atL(s-8,2.4));cam.fov=34}
  if(state.camMode===3){const F=state.fly;const fwdV=new THREE.Vector3(Math.sin(F.yaw)*Math.cos(F.pitch),Math.sin(F.pitch),Math.cos(F.yaw)*Math.cos(F.pitch));const right=new THREE.Vector3(Math.cos(F.yaw),0,-Math.sin(F.yaw));
   const sp=F.speed*(flyKeys.has('fast')?4:1)*dt;const mv=new THREE.Vector3();
   if(flyKeys.has('f'))mv.add(fwdV);if(flyKeys.has('b'))mv.sub(fwdV);if(flyKeys.has('r'))mv.sub(right);if(flyKeys.has('l'))mv.add(right);if(flyKeys.has('u'))mv.y+=1;if(flyKeys.has('d'))mv.y-=1;
@@ -969,11 +1019,13 @@ function updateHUD(){const s=state.s,v=state.v;$('spd').textContent=Math.round(v
  $('hDist').textContent=Math.max(0,(STOP_S-s)/1000).toFixed(2)+' كم';$('hTime').textContent=fmtTime(state.time)+' / '+fmtTime(schedule());$('hScore').textContent=Math.max(0,Math.round(state.score));
  let txt='الخط مستقيم';const z=ZONES.find(z=>z.s0-30>s);if(z&&z.s0-s<4000&&zoneLim(z)<TR.vmax)txt=`منعطف بعد <b>${((z.s0-s)/1000).toFixed(1)}</b> كم، الحد <b>${zoneLim(z)}</b>`;
  const toStop=STOP_S-s;if(toStop<6000)txt=`المحطة بعد <b>${(toStop/1000).toFixed(2)}</b> كم<br>مسافة التوقف <b>${(v*v/(2*TR.B/TR.mass*0.9)/1000).toFixed(2)}</b> كم`;
- const inZ=ZONES.find(z=>s>=z.s0-30&&s<=z.s1+30);if(inZ&&zoneLim(inZ)<TR.vmax)txt=`داخل منعطف، الحد <b>${zoneLim(inZ)}</b>`;if(MP.elev){const gp=gradeAt(s-TRAIN_LEN/2)*100;if(Math.abs(gp)>0.3)txt+=`<br>${gp<0?'نزلة':'طلعة'} <b>${Math.abs(gp).toFixed(1)}%</b>`}$('ahead').innerHTML=txt}
+ const inZ=ZONES.find(z=>s>=z.s0-30&&s<=z.s1+30);if(inZ&&zoneLim(inZ)<TR.vmax)txt=`داخل منعطف، الحد <b>${zoneLim(inZ)}</b>`;if(MP.elev){const gp=gradeAt(s-TRAIN_LEN/2)*100;if(Math.abs(gp)>0.3)txt+=`<br>${gp<0?'نزلة':'طلعة'} <b>${Math.abs(gp).toFixed(1)}%</b>`}{const nx=XOVERS.find(X=>X.s0>s+5);if(nx&&nx.s0-s<3000)txt+=`<br>التحويلة بعد <b>${((nx.s0-s)/1000).toFixed(1)}</b> كم: <b>${nx.div?(state.lane?'للأساسي':'للخط الثاني'):'مستقيم'}</b>`;
+  if(Math.abs(laneOff(s))>2.35){const A=AIS.filter(a=>a.sF>s).sort((a,b)=>a.sF-b.sF)[0];txt=`<b style="color:var(--bad)">أنت على الخط الثاني</b>`+(A?`<br>قطار جاي بعد <b>${((A.sF-s)/1000).toFixed(2)}</b> كم`:'')+'<br>'+txt}}
+ $('ahead').innerHTML=txt}
 
 /* ================= flow ================= */
-function freshCp(){return{s:START_FRONT,v:0,time:0,score:1000,lever:0,odo:0}}
-function resetTo(cp){clearCrash();state.cruise=null;uiCruise();state.mode='drive';Object.assign(state,{s:cp.s,v:cp.v,time:cp.time,score:cp.score,odo:cp.odo,force:0,em:false,sideCam:null});setLever(cp.lever??0);['crashOv','endOv','startOv'].forEach(i=>$(i).hidden=true)}
+function freshCp(){return{s:START_FRONT,v:0,time:0,score:1000,lever:0,odo:0,route:[],lane:0}}
+function resetTo(cp){clearCrash();for(const c of AICR){sc.remove(c.pivot||c.g)}AICR=[];state.cruise=null;uiCruise();state.mode='drive';Object.assign(state,{s:cp.s,v:cp.v,time:cp.time,score:cp.score,odo:cp.odo,force:0,em:false,sideCam:null,route:(cp.route||[]).map(t=>({...t})),lane:cp.lane||0});for(const X of XOVERS){X.passed=X.s0<=cp.s;X.sigPassed=X.s0-250<=cp.s;if(!X.passed)X.div=false}clearAI();aiTimer=6;setLever(cp.lever??0);['crashOv','endOv','startOv'].forEach(i=>$(i).hidden=true)}
 function restart(){state.cp=freshCp();state.nextCp=2000;state.overT=0;resetTo(state.cp)}
 function finish(){state.mode='end';state.cruise=null;uiCruise();const s=state.s;const err=Math.abs(s-STOP_S);const late=state.time-schedule();
  let pts=state.score;pts+=err<3?300:err<10?200:err<30?100:err<80?30:0;pts+=late<=0?150:Math.max(0,150-late*3);pts=Math.max(0,Math.round(pts));
@@ -981,7 +1033,7 @@ function finish(){state.mode='end';state.cruise=null;uiCruise();const s=state.s;
  $('eTitle').textContent=err<10?'توقف ممتاز في المحطة':s<STOP_S?'وقفت قبل العلامة':'تجاوزت العلامة';
  $('eStats').innerHTML=`<span>القطار</span><span>${TR.name}</span><span>بُعدك عن علامة التوقف</span><span>${err.toFixed(1)} م</span><span>وقت الرحلة</span><span>${fmtTime(state.time)}</span><span>الجدول</span><span>${fmtTime(schedule())}</span><span>وقت تجاوز السرعة</span><span>${Math.round(state.overT)} ث</span><span><b>النقاط</b></span><span><b>${pts}</b></span>`;
  setTimeout(()=>{$('endOv').hidden=false},900)}
-function showMenu(){$('flyPad').hidden=true;flyKeys.clear();clearCrash();state.cruise=null;uiCruise();state.mode='menu';Object.assign(state,{s:START_FRONT,v:0,odo:0,force:0,em:false});state.camMode=1;state.orbit={yaw:Math.PI+0.6,pitch:0.2,dist:Math.max(40,TRAIN_LEN*0.35)};setLever(0);['crashOv','endOv'].forEach(i=>$(i).hidden=true);$('startOv').hidden=false;placeTrain(state.s)}
+function showMenu(){clearAI();state.route=[];state.lane=0;for(const X of XOVERS){X.div=false;X.passed=false;X.sigPassed=false}$('flyPad').hidden=true;flyKeys.clear();clearCrash();state.cruise=null;uiCruise();state.mode='menu';Object.assign(state,{s:START_FRONT,v:0,odo:0,force:0,em:false});state.camMode=1;state.orbit={yaw:Math.PI+0.6,pitch:0.2,dist:Math.max(40,TRAIN_LEN*0.35)};setLever(0);['crashOv','endOv'].forEach(i=>$(i).hidden=true);$('startOv').hidden=false;placeTrain(state.s)}
 function pickTrain(k){if(k!==trainKey||!cars.length){buildTrain(k);try{localStorage.setItem('desertTrain',k)}catch(e){}}document.querySelectorAll('#trainPick .tcard').forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===k));setHornVoice();state.orbit.dist=Math.max(40,TRAIN_LEN*0.35);placeTrain(state.s)}
 $('trainPick').innerHTML=Object.entries(TRAINS).map(([k,t])=>`<button class="tcard" data-k="${k}" aria-pressed="false"><b>${t.name}</b><span>${t.info}</span><span class="tspd">حتى ${t.vmax} كم/س · وصلة ${t.cpl}</span></button>`).join('');
 document.querySelectorAll('#trainPick .tcard').forEach(b=>b.onclick=()=>pickTrain(b.dataset.k));
@@ -1000,6 +1052,7 @@ const FKM={KeyW:'f',ArrowUp:'f',KeyS:'b',ArrowDown:'b',KeyA:'l',ArrowLeft:'l',Ke
 addEventListener('keydown',e=>{if(state.mode!=='drive')return;if(state.camMode===3&&FKM[e.code]){flyKeys.add(FKM[e.code]);e.preventDefault();return}if(e.repeat&&!['KeyW','KeyS','ArrowUp','ArrowDown'].includes(e.code))return;
  if(e.code==='KeyX'){setCruise(state.cruise==null);return}
  if(e.code==='KeyN'){toggleSafe();return}
+ if(e.code==='KeyV'){toggleSwitch();return}
  if(state.cruise!=null&&['KeyW','ArrowUp','KeyS','ArrowDown'].includes(e.code)){cruiseAdj(e.code==='KeyW'||e.code==='ArrowUp'?10:-10);e.preventDefault();return}
  if(e.code==='KeyW'||e.code==='ArrowUp'){setLever(state.lever+0.1);e.preventDefault()}
  if(e.code==='KeyS'||e.code==='ArrowDown'){setLever(state.lever-0.1);e.preventDefault()}
@@ -1009,7 +1062,7 @@ addEventListener('keyup',e=>{if(e.code==='KeyH')horn(false);if(FKM[e.code])flyKe
 function cycleCam(){state.camMode=(state.camMode+1)%4;if(state.camMode===3){const d=new THREE.Vector3();cam.getWorldDirection(d);state.fly={pos:cam.position.clone(),yaw:Math.atan2(d.x,d.z),pitch:Math.asin(clamp(d.y,-1,1)),speed:30}}$('flyPad').hidden=state.camMode!==3;flyKeys.clear();state.sideCam=null;state.look={yaw:0,pitch:0};toast('الكاميرا: '+CAMS[state.camMode],1200)}
 function toggleSafe(on){state.safe=on===undefined?!state.safe:on;const b=$('bSafe');b.classList.toggle('on',state.safe);b.setAttribute('aria-pressed',state.safe);try{localStorage.setItem('desertSafe',state.safe?'1':'0')}catch(e){}if(on===undefined)toast(state.safe?'بدون حوادث: شغال، القطار ما يطيح أبد':'بدون حوادث: طافي',1800)}
 try{toggleSafe(localStorage.getItem('desertSafe')==='1')}catch(e){}
-$('bSafe').onclick=()=>toggleSafe();
+$('bSafe').onclick=()=>toggleSafe();$('bSwitch').onclick=()=>{if(state.mode==='drive')toggleSwitch()};
 $('bCam').onclick=cycleCam;document.querySelectorAll('#flyPad .fb').forEach(b=>{const k=b.dataset.k;b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);flyKeys.add(k)});['pointerup','pointercancel','lostpointercapture'].forEach(ev=>b.addEventListener(ev,()=>flyKeys.delete(k)))});$('bCruise').onclick=()=>setCruise(state.cruise==null);$('cPlus').onclick=()=>cruiseAdj(10);$('cMinus').onclick=()=>cruiseAdj(-10);$('cPlus50').onclick=()=>cruiseAdj(50);$('cMinus50').onclick=()=>cruiseAdj(-50);$('bEm').onclick=()=>{if(state.mode!=='drive')return;setCruise(false);state.em=!state.em;if(state.em)setLever(-1);else drawLever()};
 const bh=$('bHorn');bh.addEventListener('pointerdown',()=>horn(true));['pointerup','pointerleave','pointercancel'].forEach(ev=>bh.addEventListener(ev,()=>horn(false)));
 {const t=$('ltrack');let drag=false;const set=e=>{if(state.cruise!=null)setCruise(false);const b=t.getBoundingClientRect();setLever(1-2*clamp((e.clientY-b.top)/b.height,0,1))};
@@ -1125,16 +1178,16 @@ let fpsN=0,fpsT=performance.now();
 function frame(now){if(now-last<1000/62){requestAnimationFrame(frame);return}
  fpsN++;if(now-fpsT>2500){const fps=fpsN*1000/(now-fpsT);fpsN=0;fpsT=now;window.__fps=fps;}
  const dt=Math.min(0.05,(now-last)/1000);last=now;if(!frame.st||now-frame.st>250){frame.st=now;streamChunks()}
- if(state.mode==='drive'){for(let i=0;i<4;i++)physics(dt/4);state.time+=dt;checkRules(dt)}
+ if(state.mode==='drive'){for(let i=0;i<4;i++)physics(dt/4);state.time+=dt;updateAI(dt);checkRules(dt)}updateSignals();
  if(state.mode==='crash')crashUpdate(dt);
  else{placeTrain(state.s);updateCamera(dt);
-  if(MP.sky.night&&loco.front){loco.g.updateMatrixWorld();cv.copy(loco.front);loco.g.localToWorld(cv);headL.position.copy(cv);headL.target.position.copy(at(state.s+90,0,0.6))}
+  if(MP.sky.night&&loco.front){loco.g.updateMatrixWorld();cv.copy(loco.front);loco.g.localToWorld(cv);headL.position.copy(cv);headL.target.position.copy(atL(state.s+90,0.6))}
   for(const c of cars)for(const w of c.wheels)w.rotation.x=state.odo/w.userData.r;if(loco.update)loco.update(state.odo);
   const power=state.mode==='drive'?Math.max(0,state.force)/TR.F:0;loco.g.updateMatrixWorld();
   if(loco.chimney&&state.mode!=='end'){const rate=(2+power*30+state.v*0.3)*dt;for(let i=0;i<rate+(rnd()<rate%1?1:0);i++){cv.copy(loco.chimney);loco.g.localToWorld(cv);emit(smoke,cv,new THREE.Vector3((rnd()-.5)*1.2,3+power*4+rnd(),(rnd()-.5)*1.2),4+rnd()*2.5,1.4,11+power*7)}
    const n=Math.floor(state.odo/(2*Math.PI*loco.RD)*4);if(n!==state.chuffN){state.chuffN=n;if(state.v>0.2){chuff(0.12+power*0.5);if(state.v<15)for(const sx of[-1,1]){cv.set(sx*1.3,loco.cyl.y,loco.cyl.z);loco.g.localToWorld(cv);emit(steamP,cv,new THREE.Vector3(0,0.8,0).addScaledVector(sideV(state.s),sx*(1.2+rnd())),0.7+rnd()*0.3,0.8,3)}
      cv.copy(loco.chimney);loco.g.localToWorld(cv);for(let i=0;i<3;i++)emit(steamP,cv,new THREE.Vector3((rnd()-.5),4+power*5,(rnd()-.5)),1.2,0.9,4)}}}
-  if(loco.exhaust&&state.mode==='drive'){const rate=(1+power*16)*dt;for(const c of cars.slice(0,2)){for(let i=0;i<rate+(rnd()<rate%1?1:0);i++){cv.copy(c.exhaust);c.g.updateMatrixWorld();c.g.localToWorld(cv);emit(smoke,cv,new THREE.Vector3((rnd()-.5)*0.8,2.5+power*3,(rnd()-.5)*0.8),2.5+rnd()*1.5,1.0,6+power*5)}}}
+  if(loco.exhaust&&state.mode==='drive'){const rate=(1+power*16)*dt;for(const c of cars.slice(0,2)){if(!c.exhaust)continue;for(let i=0;i<rate+(rnd()<rate%1?1:0);i++){cv.copy(c.exhaust);c.g.updateMatrixWorld();c.g.localToWorld(cv);emit(smoke,cv,new THREE.Vector3((rnd()-.5)*0.8,2.5+power*3,(rnd()-.5)*0.8),2.5+rnd()*1.5,1.0,6+power*5)}}}
   updParticles(smoke,dt,-0.6,0.5,0.22);updParticles(steamP,dt,-0.3,1.2,0.6);updParticles(dust,dt,-0.25,0.6,0.55)}
  audioUpdate(state.mode==='crash'?0:state.v,state.mode==='drive'?Math.max(0,state.force)/TR.F:0);
  updateHUD();if(state.cruise!=null)drawLever();
