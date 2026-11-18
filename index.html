@@ -135,6 +135,15 @@ canvas#gl:active{cursor:grabbing}
 <body>
 
 <div id="loading">جاري تجهيز الخط…</div>
+<script>
+// if the game fails to start, show why instead of a black screen
+(function(){var errs=[];function show(){var L=document.getElementById('loading');if(!L)return;var gl=null;try{var c=document.createElement('canvas');gl=c.getContext('webgl2')||c.getContext('webgl')}catch(e){}
+ L.style.cssText+=';white-space:pre-wrap;max-width:92vw;line-height:1.6;font-size:15px;padding:14px;background:rgba(0,0,0,.85);border-radius:10px;z-index:99;left:4vw;top:20vh;direction:rtl;text-align:right';
+ L.textContent='اللعبة ما اشتغلت 😕\n'+(!gl?'المتصفح ما شغّل كرت الشاشة (WebGL). في Chrome: الإعدادات ← النظام ← فعّل "استخدام تسريع الأجهزة" وأعد تشغيل المتصفح.\n':'')+(errs.length?'الخطأ: '+errs.slice(0,3).join(' | '):'ما وصلت ملفات اللعبة (three.js). جرّب تحديث الصفحة أو إنترنت ثاني.')+'\nصوّر هذي الرسالة وأرسلها.'}
+ addEventListener('error',function(e){errs.push((e.message||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''));show()});
+ addEventListener('unhandledrejection',function(e){errs.push(String(e.reason&&e.reason.message||e.reason));show()});
+ setTimeout(show,20000)})();
+</script>
 <canvas id="gl"></canvas>
 <div id="cab"></div>
 <div id="slow"></div>
@@ -245,7 +254,7 @@ canvas#gl:active{cursor:grabbing}
   </div>
 </div>
 
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="importmap">{"imports":{"three":"./three.module.js"}}</script>
 <script type="module">
 import * as THREE from 'three';
 
