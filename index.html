@@ -420,9 +420,12 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
  // ground: flat by the track, dunes / cliffs / sea further away
  let minX=1e9,maxX=-1e9,minZ=1e9,maxZ=-1e9;for(let i=0;i<=TOTAL;i+=10){minX=Math.min(minX,X[i]);maxX=Math.max(maxX,X[i]);minZ=Math.min(minZ,Z[i]);maxZ=Math.max(maxZ,Z[i])}
  const CX=(minX+maxX)/2,CZ=(minZ+maxZ)/2,GS=Math.max(maxX-minX,maxZ-minZ)+9000;
- {const seg=MP.elev?(isMobile?240:330):(isMobile?170:230);const g=new THREE.PlaneGeometry(GS,GS,seg,seg);g.rotateX(-Math.PI/2);g.translate(CX,0,CZ);const pa=g.attributes.position;
-  const coarse=[];for(let i=0;i<=TOTAL;i+=(MP.elev?20:40))coarse.push([X[i],Z[i],HD[i],i]);const sides=new Float32Array(pa.count);
-  groundH=(x,z)=>{if(!(isFinite(x)&&isFinite(z)))return 0;let d=1e9,best=null;for(const c of coarse){const q=(x-c[0])**2+(z-c[1])**2;if(q<d){d=q;best=c}}if(!best)return 0;d=Math.sqrt(d);const side=(x-best[0])*Math.cos(best[2])-(z-best[1])*Math.sin(best[2]);
+ {const coarse=[];for(let i=0;i<=TOTAL;i+=(MP.elev?20:40))coarse.push([X[i],Z[i],HD[i],i]);
+  // nearest track point through a grid, so long maps stay fast
+  const CG=200,GRID=new Map(),gk=(i,j)=>(i+30000)*65536+(j+30000);for(const c of coarse){const k=gk(Math.floor(c[0]/CG),Math.floor(c[1]/CG));let a=GRID.get(k);if(!a)GRID.set(k,a=[]);a.push(c)}const sparse=coarse.filter((c,i)=>i%8===0);
+  const nearest=(x,z)=>{const ix=Math.floor(x/CG),iz=Math.floor(z/CG);let d=1e18,best=null;for(let r=0;r<=22;r++){for(let i=ix-r;i<=ix+r;i++)for(let j=iz-r;j<=iz+r;j++){if(r&&i>ix-r&&i<ix+r&&j>iz-r&&j<iz+r)continue;const a=GRID.get(gk(i,j));if(a)for(const c of a){const q=(x-c[0])**2+(z-c[1])**2;if(q<d){d=q;best=c}}}if(best&&Math.sqrt(d)<=r*CG)break}
+   if(!best)for(const c of sparse){const q=(x-c[0])**2+(z-c[1])**2;if(q<d){d=q;best=c}}return[best,d]};
+  groundH=(x,z)=>{if(!(isFinite(x)&&isFinite(z)))return 0;let [best,d]=nearest(x,z);if(!best)return 0;d=Math.sqrt(d);const side=(x-best[0])*Math.cos(best[2])-(z-best[1])*Math.sin(best[2]);
    let h=(Math.sin(x*.012+1)*Math.cos(z*.009)*5+Math.sin(x*.004+z*.003)*14+Math.sin(x*.0011-z*.0007)*30)*MP.relief;h*=THREE.MathUtils.smoothstep(d,30,160);
    if(MP.elev&&!MP.mtnSide){h=h+YE[best[3]]+(d<22?-0.6:-3*THREE.MathUtils.smoothstep(d,14,40))}else if(MP.elev){const base=YE[best[3]];const SS=THREE.MathUtils.smoothstep;
     const P1=0.5+0.5*Math.sin(x*.0013+Math.sin(z*.0011)*2)*Math.cos(z*.0012+Math.sin(x*.0009)*1.5),P2=Math.abs(Math.sin(x*.0041-z*.0033))+Math.abs(Math.sin(x*.011+z*.007))*0.4;
@@ -432,8 +435,16 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
    if(MP.cliff)h+=THREE.MathUtils.smoothstep(d,45,260)*MP.cliff*(0.75+0.25*Math.sin(x*.003)*Math.cos(z*.0035))+THREE.MathUtils.smoothstep(d,45,260)*Math.abs(Math.sin(x*.02+z*.013))*12;
    if(MP.sea&&side>0)h=Math.min(h,0.4)-THREE.MathUtils.smoothstep(side,55,240)*12;
    return h-0.04};
-  for(let i=0;i<pa.count;i++)pa.setY(i,groundH(pa.getX(i),pa.getZ(i)));
-  g.computeVertexNormals();const nr=g.attributes.normal;const col=new Float32Array(pa.count*3);const lin=v=>Math.pow(v/255,2.2);const A=MP.gA.map(lin),Bc=MP.gB.map(lin);
+  // ground tiles: fine near the track, coarse far away; each tile has a skirt so different sizes meet without gaps
+  const tmat=new THREE.MeshStandardMaterial({map:grainTex,bumpMap:grainTex,bumpScale:2,roughness:1,vertexColors:true});tmat.userData.keepTex=1;
+  const lin=v=>Math.pow(v/255,2.2);const A=MP.gA.map(lin),Bc=MP.gB.map(lin);
+  const tile=(x0,z0,size,n)=>{const N1=n+1,pos=[],uvs=[],idx=[];for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){const x=x0+size*i/n,z=z0+size*j/n;pos.push(x,groundH(x,z),z);uvs.push(x/5,-z/5)}
+   for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=j*N1+i,b=a+1,c=a+N1,d=c+1;idx.push(a,c,b,b,c,d)}
+   const ring=[];for(let i=0;i<n;i++)ring.push(i);for(let j=0;j<n;j++)ring.push(j*N1+n);for(let i=n;i>0;i--)ring.push(n*N1+i);for(let j=n;j>0;j--)ring.push(j*N1);
+   const base=N1*N1;ring.forEach((v,k)=>{pos.push(pos[v*3],pos[v*3+1]-8,pos[v*3+2]);uvs.push(uvs[v*2],uvs[v*2+1])});
+   for(let k=0;k<ring.length;k++){const v0=ring[k],v1=ring[(k+1)%ring.length],s0=base+k,s1=base+(k+1)%ring.length;idx.push(v0,s0,v1,v1,s0,s1,v0,v1,s0,v1,s1,s0)}
+   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));g.setIndex(idx);g.computeVertexNormals();
+   const pa=g.attributes.position,nr=g.attributes.normal;const col=new Float32Array(pa.count*3);const lin=v=>Math.pow(v/255,2.2);const A=MP.gA.map(lin),Bc=MP.gB.map(lin);
   for(let i=0;i<pa.count;i++){const y=pa.getY(i);let t=0.15+0.15*Math.sin(pa.getX(i)*.05)*Math.cos(pa.getZ(i)*.04);
    if(MP.strata)t=0.5+0.5*Math.sin(y*0.22+Math.sin(pa.getX(i)*.01)*1.5);
    if(MP.slope)t=THREE.MathUtils.smoothstep(1-nr.getY(i),0.08,0.3);
@@ -441,8 +452,11 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
    if(MP.sea&&y<-0.6)t=0.75;
    if(MP.snowLine&&y>MP.snowLine){const k=THREE.MathUtils.smoothstep(y,MP.snowLine,MP.snowLine+80)*(nr.getY(i)>0.55?1:0.35);col.set([lerp(lerp(A[0],Bc[0],t),0.85,k),lerp(lerp(A[1],Bc[1],t),0.88,k),lerp(lerp(A[2],Bc[2],t),0.92,k)],i*3);continue}
    col.set([lerp(A[0],Bc[0],t),lerp(A[1],Bc[1],t),lerp(A[2],Bc[2],t)],i*3)}
-  g.setAttribute('color',new THREE.BufferAttribute(col,3));const uv=g.attributes.uv;for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*GS/5,uv.getY(i)*GS/5);
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:grainTex,bumpMap:grainTex,bumpScale:2,roughness:1,vertexColors:true}));m.material.userData.keepTex=1;m.receiveShadow=true;world.add(m);
+   g.setAttribute('color',new THREE.BufferAttribute(col,3));const m=new THREE.Mesh(g,tmat);m.receiveShadow=true;world.add(m)};
+  const BIG=6000,nB=Math.ceil(GS/BIG),X0=CX-nB*BIG/2,Z0=CZ-nB*BIG/2,fine=isMobile?32:25;
+  const dTo=(x,z)=>Math.sqrt(nearest(x,z)[1]);
+  for(let bj=0;bj<nB;bj++)for(let bi=0;bi<nB;bi++){const bx=X0+bi*BIG,bz=Z0+bj*BIG;if(dTo(bx+BIG/2,bz+BIG/2)>BIG*0.71+3000){tile(bx,bz,BIG,30);continue}
+   for(let j=0;j<3;j++)for(let i=0;i<3;i++){const x=bx+i*2000,z=bz+j*2000;const dd=dTo(x+1000,z+1000)-1415;tile(x,z,2000,dd<350?Math.round(2000/fine):dd<2500?40:14)}}
   if(MP.sea){const w=new THREE.Mesh(new THREE.PlaneGeometry(GS,GS),new THREE.MeshStandardMaterial({color:0x1d6f8f,roughness:.08,metalness:.3,envMapIntensity:1.2}));w.rotation.x=-Math.PI/2;w.position.set(CX,-1.6,CZ);world.add(w)}}
  for(let k=0;k<2;k++){const geo=new THREE.BufferGeometry();const v=[];const R=GS*0.62+k*900;const N=260;for(let i=0;i<=N;i++){const a=i/N*Math.PI*2;const h=((120+k*90)*(0.55+0.45*Math.sin(a*7+k)*Math.sin(a*3.1+2*k)+0.2*Math.sin(a*23))+40)*MP.mtnH;v.push(CX+Math.cos(a)*R,-5,CZ+Math.sin(a)*R,CX+Math.cos(a)*R,Math.max(h,10),CZ+Math.sin(a)*R)}
   const idx=[];for(let i=0;i<N;i++){const a=i*2;idx.push(a,a+2,a+1,a+1,a+2,a+3)}geo.setAttribute('position',new THREE.Float32BufferAttribute(v,3));geo.setIndex(idx);geo.computeVertexNormals();
