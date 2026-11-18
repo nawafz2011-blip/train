@@ -140,7 +140,7 @@ canvas#gl:active{cursor:grabbing}
 (function(){var errs=[];function show(){var L=document.getElementById('loading');if(!L)return;var gl=null;try{var c=document.createElement('canvas');gl=c.getContext('webgl2')||c.getContext('webgl')}catch(e){}
  L.style.cssText+=';white-space:pre-wrap;max-width:92vw;line-height:1.6;font-size:15px;padding:14px;background:rgba(0,0,0,.85);border-radius:10px;z-index:99;left:4vw;top:20vh;direction:rtl;text-align:right';
  L.textContent='اللعبة ما اشتغلت 😕\n'+(!gl?'المتصفح ما شغّل كرت الشاشة (WebGL). في Chrome: الإعدادات ← النظام ← فعّل "استخدام تسريع الأجهزة" وأعد تشغيل المتصفح.\n':'')+(errs.length?'الخطأ: '+errs.slice(0,3).join(' | '):'ما وصلت ملفات اللعبة (three.js). جرّب تحديث الصفحة أو إنترنت ثاني.')+'\nصوّر هذي الرسالة وأرسلها.'}
- addEventListener('error',function(e){errs.push((e.message||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''));show()});
+ addEventListener('error',function(e){errs.push((e.message||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:'')+(e.error&&e.error.stack?' ← '+String(e.error.stack).split('\n').slice(1,5).map(function(x){return x.replace(/.*\//,'').trim()}).join(' ← '):''));show()});
  addEventListener('unhandledrejection',function(e){errs.push(String(e.reason&&e.reason.message||e.reason));show()});
  setTimeout(show,20000)})();
 </script>
@@ -312,7 +312,9 @@ const MAPS={
   sky:{top:[.01,.02,.06],hor:[.07,.09,.18],cl:.25,gnd:[.04,.04,.07],night:1},sun:{d:[.3,.55,-.6],c:0x9fb4ff,i:0.55},hemi:[0x34406a,0x1a1510,.4],fog:[0x0b1020,300,4500],exp:1.0}
 };
 let CUSTOM=[];try{CUSTOM=JSON.parse(localStorage.getItem('desertCustom')||'[]')}catch(e){}
-function customToMap(c){const base=MAPS[c.style]||MAPS.desert;return Object.assign({},base,{name:c.name,info:'خريطتي · '+(c.len/1000).toFixed(1)+' كم',segs:c.segs,st:c.st,elev:c.segs.some(g=>g.g)?1:base.elev||0,custom:c.id})}
+function cleanSegs(a){let segs=(Array.isArray(a)?a:[]).map(g=>{if(!g)return null;const o={g:clamp(+g.g||0,-8,8)};if(+g.S>0)o.S=Math.max(1,Math.round(+g.S));else if(+g.R>0&&+g.a>0){o.R=Math.max(40,+g.R);o.a=Math.min(360,+g.a);o.d=+g.d<0?-1:1}else return null;return o}).filter(Boolean);
+ let L=segs.reduce((t,g)=>t+(g.S||g.R*g.a*Math.PI/180),0);if(L<1500)segs.push({S:Math.ceil(1500-L),g:0});return segs}
+function customToMap(c){const base=MAPS[c.style]||MAPS.desert;const sg=cleanSegs(c.segs);return Object.assign({},base,{name:c.name||'خريطتي',info:'خريطتي · '+((+c.len||0)/1000).toFixed(1)+' كم',segs:sg,st:Array.isArray(c.st)&&c.st.length>=2?c.st:['محطة البداية','محطة النهاية'],elev:sg.some(g=>g.g)?1:base.elev||0,custom:c.id})}
 function registerCustom(){for(const k of Object.keys(MAPS))if(k.startsWith('c_'))delete MAPS[k];for(const c of CUSTOM)MAPS['c_'+c.id]=customToMap(c)}
 registerCustom();
 let mapKey='desert';try{const k=localStorage.getItem('desertMap');if(MAPS[k])mapKey=k}catch(e){}
@@ -330,14 +332,14 @@ function buildTrack(){X=[0];Z=[0];HD=[0];K=[0];const GR=[0];let x=0,z=0,h=0,gr=0
  STOP_S=TOTAL-260;BUFFER_S=TOTAL-40;STATIONS=[{name:MP.st[0],s0:40,s1:420},{name:MP.st[1],s0:TOTAL-560,s1:TOTAL-120}];
  XOVERS=[];{let last=-1e9;for(let q=1000;q<TOTAL-1600;q+=10){if(q-last<2200)continue;let ok=true;for(let r2=q-320;r2<=q+XL+60;r2+=10)if(K[clamp(r2,0,TOTAL)]!==0){ok=false;break}
   if(ok&&!STATIONS.some(st=>q+XL>st.s0-200&&q-320<st.s1+50)){XOVERS.push({s0:q,div:false});last=q}}}}
-buildTrack();
+try{buildTrack();if(!(TOTAL>100)||!isFinite(X[TOTAL]))throw 0}catch(e){mapKey='desert';MP=MAPS.desert;buildTrack()}
 function zoneLim(z){return Math.min(TR.vmax,Math.floor(Math.sqrt(TR.safe*z.R)*KMH/10)*10)}
 function limitAt(s){let l=TR.vmax;for(const z of ZONES)if(s>=z.s0-30&&s<=z.s1+30){l=zoneLim(z);break}
  if(typeof state!=='undefined'){for(const X of XOVERS)if(X.div&&s>=X.s0-30&&s<=X.s0+XL+30)l=Math.min(l,60);for(const t of state.route)if(s>=t.s0-30&&s<=t.s0+XL+30)l=Math.min(l,60)}return l}
 // which line the train is on at distance s (0 = main, LANE2 = second line), following the crossovers it has taken
 function laneOff(s){let lane=0;for(const t of state.route){if(s<t.s0)break;const u=(s-t.s0)/XL;if(u<1)return LANE2*lerp(t.from,t.to,u*u*(3-2*u));lane=t.to}return LANE2*lane}
 function atL(s,y=0){return at(s,laneOff(s),y)}
-function at(s,off=0,y=0){s=clamp(s,0,TOTAL);const i=Math.min(Math.floor(s),TOTAL-1),f=s-i;const h=lerp(HD[i],HD[i+1],f);return new THREE.Vector3(lerp(X[i],X[i+1],f)+Math.cos(h)*off,y+lerp(YE[i],YE[i+1],f),lerp(Z[i],Z[i+1],f)-Math.sin(h)*off)}
+function at(s,off=0,y=0){if(s!==s)s=0;if(off!==off)off=0;s=clamp(s,0,TOTAL);const i=Math.min(Math.floor(s),TOTAL-1),f=s-i;const h=lerp(HD[i],HD[i+1],f);return new THREE.Vector3(lerp(X[i],X[i+1],f)+Math.cos(h)*off,y+lerp(YE[i],YE[i+1],f),lerp(Z[i],Z[i+1],f)-Math.sin(h)*off)}
 function cantAt(s){return CANT[clamp(Math.round(s),0,TOTAL)]||0}
 function elevAt(s){s=clamp(s,0,TOTAL);const i=Math.min(Math.floor(s),TOTAL-1);return lerp(YE[i],YE[i+1],s-i)}
 function gradeAt(s){const i=clamp(Math.floor(s),0,TOTAL-1);return YE[i+1]-YE[i]}
@@ -420,7 +422,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
  const CX=(minX+maxX)/2,CZ=(minZ+maxZ)/2,GS=Math.max(maxX-minX,maxZ-minZ)+9000;
  {const seg=MP.elev?(isMobile?240:330):(isMobile?170:230);const g=new THREE.PlaneGeometry(GS,GS,seg,seg);g.rotateX(-Math.PI/2);g.translate(CX,0,CZ);const pa=g.attributes.position;
   const coarse=[];for(let i=0;i<=TOTAL;i+=(MP.elev?20:40))coarse.push([X[i],Z[i],HD[i],i]);const sides=new Float32Array(pa.count);
-  groundH=(x,z)=>{let d=1e9,best=null;for(const c of coarse){const q=(x-c[0])**2+(z-c[1])**2;if(q<d){d=q;best=c}}d=Math.sqrt(d);const side=(x-best[0])*Math.cos(best[2])-(z-best[1])*Math.sin(best[2]);
+  groundH=(x,z)=>{if(!(isFinite(x)&&isFinite(z)))return 0;let d=1e9,best=null;for(const c of coarse){const q=(x-c[0])**2+(z-c[1])**2;if(q<d){d=q;best=c}}if(!best)return 0;d=Math.sqrt(d);const side=(x-best[0])*Math.cos(best[2])-(z-best[1])*Math.sin(best[2]);
    let h=(Math.sin(x*.012+1)*Math.cos(z*.009)*5+Math.sin(x*.004+z*.003)*14+Math.sin(x*.0011-z*.0007)*30)*MP.relief;h*=THREE.MathUtils.smoothstep(d,30,160);
    if(MP.elev&&!MP.mtnSide){h=h+YE[best[3]]+(d<22?-0.6:-3*THREE.MathUtils.smoothstep(d,14,40))}else if(MP.elev){const base=YE[best[3]];const SS=THREE.MathUtils.smoothstep;
     const P1=0.5+0.5*Math.sin(x*.0013+Math.sin(z*.0011)*2)*Math.cos(z*.0012+Math.sin(x*.0009)*1.5),P2=Math.abs(Math.sin(x*.0041-z*.0033))+Math.abs(Math.sin(x*.011+z*.007))*0.4;
@@ -519,7 +521,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
   const buf=new THREE.Group();const bb=new THREE.Mesh(new THREE.BoxGeometry(3.2,1.4,1.2),new THREE.MeshStandardMaterial({color:0xb3261e,roughness:.6}));bb.position.y=1.5;buf.add(bb);const st=new THREE.Mesh(new THREE.BoxGeometry(3.4,.4,.3),new THREE.MeshStandardMaterial({color:0xf2f2f2}));st.position.set(0,1.9,-.62);buf.add(st);
   buf.position.copy(at(BUFFER_S+2));buf.rotation.y=headingAt(BUFFER_S);buf.traverse(o=>o.castShadow=true);world.add(buf)}
  applyMapLook()}
-buildWorld();
+try{buildWorld()}catch(e){if(mapKey==='desert')throw e;console.warn('map failed, using desert',e);mapKey='desert';MP=MAPS.desert;try{localStorage.setItem('desertMap','desert')}catch(_){}buildTrack();buildWorld()}
 
 /* ================= rolling stock (all original designs) ================= */
 // every vehicle: Group with local z from 0 (rear) to len (front), x across, y up from ground
