@@ -1110,10 +1110,71 @@ function crashUpdate(dt){const slow=state.crashT<6?0.35:1;const sdt=dt*slow;stat
  if(state.crashT>2.5&&$('crashOv').hidden){const nb=state.cplBroken.length;$('crashWhy').textContent=state.crashWhy+` أقوى شد على الوصلات كان ${state.cplMax.toFixed(1)}، وقوة الوصلة ${TR.cpl}. `+(nb?`انقطعت ${nb===1?'وصلة وحدة':nb===2?'وصلتين':nb+' وصلات'}.`:'ما انقطعت ولا وصلة.');$('crashOv').hidden=false}if(state.crashT>6.5)$('slow').style.display='none'}
 function clearCrash(){fxRestore();unsplitAll();for(const c of AICR)sc.remove(c.pivot||c.g);AICR=[];document.body.classList.remove('crashing');$('crashWhy').hidden=true;if(AC){const t=AC.currentTime;au.sg.gain.setTargetAtTime(0,t,.1);au.rgc.gain.setTargetAtTime(0,t,.1)}for(const c of cars){if(c.pivot){sc.attach(c.g);sc.remove(c.pivot);c.pivot=null}}clearParticles();$('slow').style.display='none'}
 
+/* ================= 3D cab ================= */
+const cabG=new THREE.Group();cabG.visible=false;sc.add(cabG);let cabKind=null,cabGauge=null,cabLever=null,cabGT=0;
+const STEAMK=['steam','crimson','stream','green','giant'];
+function cabBox(w,h,d,m,x,y,z,rx=0){const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);b.rotation.x=rx;cabG.add(b);return b}
+function buildCab(kind){while(cabG.children.length){const o=cabG.children.pop();o.traverse(q=>{if(q.geometry)q.geometry.dispose()})}cabKind=kind;
+ const M=(c,r=.8,m=0)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m,envMapIntensity:.35});
+ const gc=document.createElement('canvas');gc.width=1024;gc.height=400;const gt=new THREE.CanvasTexture(gc);gt.colorSpace=THREE.SRGBColorSpace;gt.anisotropy=8;cabGauge={c:gc,t:gt};
+ const glass=new THREE.MeshStandardMaterial({color:0x9fb4c4,roughness:.05,metalness:.9,transparent:true,opacity:.07,envMapIntensity:1.2,depthWrite:false});
+ if(kind==='modern'){const wall=M(0x30353c),trim=M(0x16191d,.6),desk=M(0x3b4148,.7),metal=M(0xa8adb3,.35,.8),floor=M(0x1d2024,.95),seat=M(0x2a3a52,.9);
+  // windscreen frame
+  cabBox(3.0,0.95,0.12,wall,0,-0.86,1.25);cabBox(3.0,0.42,0.12,wall,0,0.82,1.25);cabBox(0.28,1.05,0.14,trim,-1.36,0.12,1.24);cabBox(0.28,1.05,0.14,trim,1.36,0.12,1.24);cabBox(0.07,1.05,0.1,trim,0,0.12,1.24);
+  const ws=new THREE.Mesh(new THREE.PlaneGeometry(2.5,1.0),glass);ws.position.set(0,0.12,1.22);ws.rotation.y=Math.PI;cabG.add(ws);
+  const visor=new THREE.Mesh(new THREE.PlaneGeometry(1.1,0.22),new THREE.MeshStandardMaterial({color:0x101418,transparent:true,opacity:.55,roughness:.4,depthWrite:false}));visor.position.set(-0.62,0.5,1.17);visor.rotation.set(0.25,Math.PI,0);cabG.add(visor);
+  for(const x of[-0.62,0.62]){const w=cabBox(0.95,0.025,0.02,trim,x+0.12,-0.32,1.18);w.rotation.z=x<0?0.5:-0.5}
+  // side walls with windows
+  for(const sg of[-1,1]){const x=sg*1.48;cabBox(0.1,1.05,2.9,wall,x,-0.82,-0.2);cabBox(0.1,0.45,2.9,wall,x,0.78,-0.2);cabBox(0.1,0.8,0.5,wall,x,0.15,-1.4);cabBox(0.08,0.8,0.06,trim,x,0.15,-0.6);
+   const sw=new THREE.Mesh(new THREE.PlaneGeometry(1.8,0.8),glass);sw.position.set(x*0.99,0.15,0.1);sw.rotation.y=-sg*Math.PI/2;cabG.add(sw)}
+  cabBox(3.0,0.08,3.0,trim,0,1.02,-0.2);cabBox(3.0,2.4,0.1,wall,0,-0.2,-1.65);cabBox(3.0,0.06,3.0,floor,0,-1.38,-0.2);
+  const lamp=cabBox(0.5,0.03,0.25,new THREE.MeshBasicMaterial({color:0xfff3d8}),0,0.97,-0.4);
+  // desk with instruments
+  cabBox(2.7,0.55,0.6,desk,0,-0.82,1.0);const top=cabBox(2.7,0.06,0.6,desk,0,-0.53,0.93,-0.3);
+  const gp=new THREE.Mesh(new THREE.PlaneGeometry(1.15,0.45),new THREE.MeshBasicMaterial({map:gt,toneMapped:false}));gp.scale.set(0.8,0.8,1);gp.position.set(-0.3,-0.47,0.96);gp.rotation.order='YXZ';gp.rotation.set(-(Math.PI/2-0.62),Math.PI,0);cabG.add(gp);
+  for(let i=0;i<6;i++){const b=cabBox(0.035,0.02,0.035,new THREE.MeshStandardMaterial({color:[0xd23a2a,0x2aa84a,0xe0c040,0xd0d0d0,0x2a6ad2,0xd23a2a][i],roughness:.4,emissive:[0x300000,0x003010,0x302800,0x101010,0x001030,0x300000][i]}),0.38+(i%3)*0.07,-0.5,0.86+Math.floor(i/3)*0.07,-0.3)}
+  // power / brake lever
+  cabBox(0.14,0.1,0.32,metal,0.85,-0.49,0.8,-0.3);const lv=new THREE.Group();lv.position.set(0.85,-0.44,0.8);const st=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.24,10),metal);st.position.y=0.12;lv.add(st);
+  const kn=new THREE.Mesh(new THREE.SphereGeometry(0.035,16,12),M(0x111111,.35));kn.position.y=0.25;lv.add(kn);cabG.add(lv);cabLever=lv;
+  // driver's seat back (seen when looking around)
+  cabBox(0.6,0.7,0.1,seat,0,-0.75,-0.55);cabBox(0.6,0.1,0.55,seat,0,-1.05,-0.3)}
+ else{const iron=M(0x1b1b1d,.55,.6),brass=M(0xc8a24a,.3,1),wood=M(0x5a3a22,.8),wall=M(0x232426,.75);const bx=-TR.cab.x;
+  // boiler backhead
+  const bh=new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.05,0.5,40),iron);bh.rotation.x=Math.PI/2;bh.position.set(bx,-0.55,1.45);cabG.add(bh);
+  const fd=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.28,0.06,24),M(0x2a2420,.6,.4));fd.rotation.x=Math.PI/2;fd.position.set(bx,-1.05,1.18);cabG.add(fd);
+  for(const [x,y] of [[bx-0.35,-0.05],[bx+0.35,-0.05]]){const g=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.15,0.08,28),brass);g.rotation.x=Math.PI/2;g.position.set(x,y,1.17);cabG.add(g)}
+  const gp=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.35),new THREE.MeshBasicMaterial({map:gt,toneMapped:false}));gp.position.set(bx,-0.05,1.12);gp.rotation.y=Math.PI;cabG.add(gp);
+  for(const x of[bx-0.75,bx+0.75]){const t=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,0.5,10),new THREE.MeshStandardMaterial({color:0xcfe6ee,transparent:true,opacity:.5,roughness:.1}));t.position.set(x,-0.55,1.15);cabG.add(t)}
+  const pipe=new THREE.Mesh(new THREE.TorusGeometry(0.9,0.03,8,40,Math.PI),brass);pipe.position.set(bx,-0.55,1.18);cabG.add(pipe);
+  // front wall with spectacle windows either side of the boiler, roof and open sides
+  cabBox(3.2,0.55,0.12,wall,bx,0.78,1.55);for(const sg of[-1,1]){cabBox(0.5,1.1,0.12,wall,bx+sg*1.35,0.0,1.55);cabBox(0.32,0.5,0.12,wall,bx+sg*0.62,0.25,1.55)}
+  cabBox(3.4,0.08,3.4,wall,bx,1.05,0.0);for(const sg of[-1,1]){cabBox(0.08,2.4,0.12,wood,bx+sg*1.55,-0.2,1.5);cabBox(0.08,1.0,2.8,wall,bx+sg*1.6,-0.9,0.1)}
+  cabBox(3.2,0.08,3.0,wood,bx,-1.35,0.0);
+  const lv=new THREE.Group();lv.position.set(0.25,-0.75,0.85);const st=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.55,0.05),M(0x8a8f95,.35,.9));st.position.y=0.27;lv.add(st);const kn=new THREE.Mesh(new THREE.SphereGeometry(0.05,14,10),wood);kn.position.y=0.55;lv.add(kn);cabG.add(lv);cabLever=lv}
+ cabG.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;o.frustumCulled=false}})}
+function drawGauges(){const g=cabGauge.c.getContext('2d'),W=1024,H=400;const v=Math.max(0,state.v*KMH),vm=TR.vmax;const steam=cabKind==='steam';
+ g.fillStyle=steam?'#1a1712':'#0d1013';g.fillRect(0,0,W,H);
+ const dial=(cx,cy,R,val,max,label,unit,col,ticks)=>{g.save();g.translate(cx,cy);g.fillStyle=steam?'#efe6cf':'#05070a';g.beginPath();g.arc(0,0,R,0,7);g.fill();g.strokeStyle=steam?'#b08a3a':'#5a6470';g.lineWidth=10;g.stroke();
+  const a0=Math.PI*0.75,a1=Math.PI*2.25;g.strokeStyle=steam?'#222':'#c8d0d8';g.fillStyle=g.strokeStyle;g.font='bold 30px sans-serif';g.textAlign='center';g.textBaseline='middle';
+  for(let i=0;i<=ticks;i++){const a=a0+(a1-a0)*i/ticks;g.lineWidth=i%2?3:6;g.beginPath();g.moveTo(Math.cos(a)*R*0.82,Math.sin(a)*R*0.82);g.lineTo(Math.cos(a)*R*0.95,Math.sin(a)*R*0.95);g.stroke();if(!(i%2))g.fillText(Math.round(max*i/ticks),Math.cos(a)*R*0.64,Math.sin(a)*R*0.64)}
+  if(col){g.strokeStyle=col;g.lineWidth=8;const al=a0+(a1-a0)*Math.min(1,col.lim/max);g.beginPath();g.arc(0,0,R*0.88,al,a1);g.stroke()}
+  const a=a0+(a1-a0)*Math.min(1,Math.max(0,val/max));g.strokeStyle='#e8402a';g.lineWidth=7;g.beginPath();g.moveTo(-Math.cos(a)*R*0.12,-Math.sin(a)*R*0.12);g.lineTo(Math.cos(a)*R*0.86,Math.sin(a)*R*0.86);g.stroke();
+  g.fillStyle=steam?'#222':'#9aa4ae';g.beginPath();g.arc(0,0,12,0,7);g.fill();g.font='26px sans-serif';g.fillText(label,0,R*0.42);g.restore()};
+ const lim=limitAt(state.s);
+ if(!steam){const mx=Math.ceil((vm+20)/40)*40;dial(200,200,180,v,mx,'كم/س','',{lim:lim,toString(){return'#d03020'}},mx/20);
+  const br=state.em?5:Math.max(0,-state.lever)*4.5,pw=Math.max(0,state.lever)*100;dial(560,200,120,br,5,'فرامل bar','',null,10);dial(840,200,120,pw,100,'جر %','',null,10);
+  g.fillStyle='#ffb020';g.font='bold 44px monospace';g.textAlign='center';g.fillText(Math.round(v),200,330);g.fillStyle=state.cruise!=null?'#39d27a':'#33404c';g.font='bold 26px sans-serif';g.fillText(state.cruise!=null?'مثبت '+state.cruise:'',700,360)}
+ else{dial(260,200,170,v,Math.ceil(vm/20)*20,'كم/س','',null,10);dial(760,200,170,12+Math.max(0,state.lever)*4+Math.sin(state.time*0.7),18,'ضغط البخار','',{lim:16,toString(){return'#b02010'}},9)}
+ cabGauge.t.needsUpdate=true}
+function updateCab(on,p,h,dt){if(!on){cabG.visible=false;return}const want=STEAMK.includes(trainKey)?'steam':'modern';if(cabKind!==want||!cabGauge)buildCab(want);cabG.visible=true;
+ cabG.position.copy(p);cabG.rotation.set(0,h,0);cabG.rotateZ(-cantAt(state.s));cabLever.rotation.x=(cabKind==='steam'?-0.5:-0.55)*state.lever;
+ cabGT-=dt;if(cabGT<=0){cabGT=1/12;drawGauges()}}
+
 /* ================= cameras ================= */
 const CAMS=['الكابينة','حرة','جنب السكة','طيران حر'];const flyKeys=new Set();
-function updateCamera(dt){const s=state.s,cfg=TR.cab;loco.g.visible=!(state.camMode===0&&cfg.hide);$('cab').style.display=state.camMode===0&&cfg.hide?'block':'none';$('hint').hidden=state.camMode===2||state.mode!=='drive'||state.cruise!=null;$('hint').textContent=state.camMode===3?'W A S D للحركة، Q و E تحت وفوق، Shift أسرع، والعجلة للسرعة':'اسحب على الشاشة عشان تلف الكاميرا';
- if(state.camMode===0){const p=at(s-cfg.back,cfg.x+laneOff(s-cfg.back),cfg.y);cam.position.copy(p);const h=headingAt(s)+state.look.yaw,pt=state.look.pitch-0.04;cam.lookAt(p.x+Math.sin(h)*Math.cos(pt)*50,p.y+Math.sin(pt)*50,p.z+Math.cos(h)*Math.cos(pt)*50);cam.rotateZ(cantAt(s));cam.fov=62}
+function updateCamera(dt){const s=state.s,cfg=TR.cab;loco.g.visible=!(state.camMode===0&&cfg.hide);$('cab').style.display='none';$('hint').hidden=state.camMode===2||state.mode!=='drive'||state.cruise!=null;$('hint').textContent=state.camMode===3?'W A S D للحركة، Q و E تحت وفوق، Shift أسرع، والعجلة للسرعة':'اسحب على الشاشة عشان تلف الكاميرا';
+ updateCab(state.camMode===0&&cfg.hide&&state.mode!=='crash',at(s-cfg.back,cfg.x+laneOff(s-cfg.back),cfg.y),headingAt(s-cfg.back),dt);
+ if(state.camMode===0){const p=at(s-cfg.back,cfg.x+laneOff(s-cfg.back),cfg.y);{const sh=Math.min(1,state.v/40)*0.006;p.y+=Math.sin(state.time*17)*sh+Math.sin(state.time*5.3)*sh*0.7}cam.position.copy(p);const h=headingAt(s)+state.look.yaw,pt=state.look.pitch-0.04;cam.lookAt(p.x+Math.sin(h)*Math.cos(pt)*50,p.y+Math.sin(pt)*50,p.z+Math.cos(h)*Math.cos(pt)*50);cam.rotateZ(cantAt(s));cam.fov=62}
  else if(state.camMode===1){const o=state.orbit;if(state.mode==='menu'&&!state.dragging)o.yaw+=dt*0.08;const tg=atL(s-7,2.4);const h=headingAt(s)+o.yaw;
   cam.position.set(tg.x+Math.sin(h)*Math.cos(o.pitch)*o.dist,tg.y+Math.sin(o.pitch)*o.dist,tg.z+Math.cos(h)*Math.cos(o.pitch)*o.dist);if(cam.position.y<tg.y-1.4)cam.position.y=tg.y-1.4;cam.lookAt(tg);cam.fov=50}
  else{if(!state.sideCam||s>state.sideCam.s+40||s<state.sideCam.s-900){const cs=Math.min(s+180+rnd()*120,TOTAL-30);state.sideCam={s:cs,p:at(cs,(rnd()<.5?-1:1)*(10+rnd()*8),1.6+rnd()*2)}}cam.position.copy(state.sideCam.p);cam.lookAt(atL(s-8,2.4));cam.fov=34}
