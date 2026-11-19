@@ -197,6 +197,10 @@ canvas#gl:active{cursor:grabbing}
     <div class="trains" id="trainPick"></div>
     <div class="pickLbl">جودة الرسوم</div>
     <div class="qrow" id="qPick"></div>
+    <div class="pickLbl">الطقس</div>
+    <div class="qrow" id="wxPick"></div>
+    <div class="pickLbl">الوقت</div>
+    <div class="qrow" id="todPick"></div>
     <div class="keys">
       <kbd>W / ↑</kbd><span>زيادة الجر</span>
       <kbd>S / ↓</kbd><span>تخفيف ثم فرامل</span>
@@ -887,7 +891,7 @@ function crashSound(){if(!AC)return;const t=AC.currentTime;const s=au.noise();co
  const o=AC.createOscillator();o.frequency.setValueAtTime(70,t);o.frequency.exponentialRampToValueAtTime(30,t+1);const og=AC.createGain();og.gain.setValueAtTime(.8,t);og.gain.exponentialRampToValueAtTime(.001,t+1.2);o.connect(og).connect(au.master);o.start(t);o.stop(t+1.3)}
 
 /* ================= state & physics ================= */
-const state={mode:'menu',s:START_FRONT,v:0,odo:0,lever:0,em:false,force:0,time:0,score:1000,overT:0,cp:null,nextCp:2000,camMode:1,crashT:0,crashWhy:'',sideCam:null,chuffN:0,cruise:null,safe:false,route:[],lane:0,
+const state={weather:'clear',todMode:'day',tod:0.45,mode:'menu',s:START_FRONT,v:0,odo:0,lever:0,em:false,force:0,time:0,score:1000,overT:0,cp:null,nextCp:2000,camMode:1,crashT:0,crashWhy:'',sideCam:null,chuffN:0,cruise:null,safe:false,route:[],lane:0,
  orbit:{yaw:Math.PI+0.5,pitch:0.22,dist:42},look:{yaw:0,pitch:0}};
 const schedule=()=>Math.round(TOTAL/(TR.avg/KMH));
 function setLever(x){state.lever=clamp(Math.round(x*10)/10,-1,1);if(state.lever>0)state.em=false;drawLever()}
@@ -902,7 +906,7 @@ function fmtTime(t){t=Math.max(0,Math.round(t));return Math.floor(t/60)+':'+Stri
 function physics(dt){const v=state.v;let target;const vmax=TR.vmax/KMH;
  if(state.cruise!=null&&!state.em){const tv=state.cruise/KMH;const a=clamp((tv-v)*0.5,-1.2,1.5);const res=v>0.01?TR.A+TR.Bd*v+TR.C*v*v:TR.A;const F=TR.mass*(a+9.81*gradeAt(state.s-TRAIN_LEN/2))+res;state.cruiseF=Math.max(F,-TR.BE);state.lever=F>0?clamp(F/Math.min(TR.F,TR.P/Math.max(v,0.5)),0,1):clamp(F/TR.B,-1,0)}
  if(state.em)target=-TR.BE;else if(state.cruise!=null)target=state.cruiseF;else if(state.lever>0)target=v>vmax?0:state.lever*Math.min(TR.F,TR.P/Math.max(v,0.5));else target=state.lever*TR.B;
- state.force+=(target-state.force)*Math.min(1,dt/(state.em?0.4:1.2));
+ if(state.weather==='rain')target*=target<0?0.72:0.85;state.force+=(target-state.force)*Math.min(1,dt/(state.em?0.4:1.2));
  const res=v>0.01?TR.A+TR.Bd*v+TR.C*v*v:0;const gA=-9.81*gradeAt(state.s-TRAIN_LEN/2);const acc=(state.force-res)/TR.mass+gA;let nv=v+acc*dt;if(nv<0)nv=0;if(v<=0.01&&acc<=0)nv=0;state.v=nv;state.s+=nv*dt;state.odo+=nv*dt}
 function checkRules(dt){const s=state.s,v=state.v;
  if(!state.safe)for(const [ci,c] of cars.entries()){const cs=s-c.frontOff-c.len/2;const k=Math.abs(K[clamp(Math.round(cs),0,TOTAL)]);if(k>0&&v*v*k>TR.derail){startCrash('curve',`دخلت منعطف نصف قطره ${Math.round(1/k)} م بسرعة ${Math.round(v*KMH)} كم/س، والحد ${limitAt(cs)} كم/س. القوة الجانبية رمت القطار برا السكة.`,ci);return}}
@@ -1110,8 +1114,42 @@ function crashUpdate(dt){const slow=state.crashT<6?0.35:1;const sdt=dt*slow;stat
  if(state.crashT>2.5&&$('crashOv').hidden){const nb=state.cplBroken.length;$('crashWhy').textContent=state.crashWhy+` أقوى شد على الوصلات كان ${state.cplMax.toFixed(1)}، وقوة الوصلة ${TR.cpl}. `+(nb?`انقطعت ${nb===1?'وصلة وحدة':nb===2?'وصلتين':nb+' وصلات'}.`:'ما انقطعت ولا وصلة.');$('crashOv').hidden=false}if(state.crashT>6.5)$('slow').style.display='none'}
 function clearCrash(){fxRestore();unsplitAll();for(const c of AICR)sc.remove(c.pivot||c.g);AICR=[];document.body.classList.remove('crashing');$('crashWhy').hidden=true;if(AC){const t=AC.currentTime;au.sg.gain.setTargetAtTime(0,t,.1);au.rgc.gain.setTargetAtTime(0,t,.1)}for(const c of cars){if(c.pivot){sc.attach(c.g);sc.remove(c.pivot);c.pivot=null}}clearParticles();$('slow').style.display='none'}
 
+
+/* ================= weather and time of day ================= */
+let envDirty=false,envT=0,envKey='',rainFx=null,sandFx=null;const _c1=new THREE.Color(),_c2=new THREE.Color(),_c3=new THREE.Color();
+const lerpA=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t);
+function envUpdate(dt){const wx=state.weather,mode=MP.sky.night?'day':state.todMode;
+ weatherFx(dt);
+ if(mode==='day'&&wx==='clear'){if(envDirty){applyMapLook();envDirty=false;envKey=''}return}
+ {const key=wx+mode+mapKey;if(key!==envKey){envKey=key;envT=0}}envDirty=true;if(mode==='cycle'&&state.mode==='drive')state.tod=(state.tod+dt/480)%1;
+ const tod=mode==='night'?0.0:mode==='day'?0.45:state.tod;const el=Math.sin((tod-0.25)*Math.PI*2);
+ const SS=THREE.MathUtils.smoothstep;let d=mode==='day'?1:SS(el,-0.12,0.22);const ss=mode==='day'?0:Math.exp(-(((el-0.04)/0.13)**2));
+ const S=MP.sky,N=MAPS.night.sky,NS=MAPS.night.sun,NH=MAPS.night.hemi,NF=MAPS.night.fog;
+ let top=lerpA(N.top,S.top,d),hor=lerpA(N.hor,S.hor,d);hor=lerpA(hor,[1,.5,.28],ss*0.75);top=lerpA(top,[.3,.28,.45],ss*0.4);
+ // sun / moon
+ const bd=new THREE.Vector3(...MP.sun.d).normalize();if(mode!=='day'){const az=Math.atan2(bd.z,bd.x)+(tod-0.45)*1.2;const e=Math.asin(Math.max(-1,Math.min(1,el)));if(el>-0.06)SUN.set(Math.cos(az)*Math.cos(Math.max(e,0.03)),Math.sin(Math.max(e,0.03)),Math.sin(az)*Math.cos(Math.max(e,0.03))).normalize();else SUN.set(...NS.d).normalize()}else SUN.copy(bd);
+ _c1.set(NS.c);_c2.set(MP.sun.c);_c3.set(0xff7a36);_c2.lerp(_c3,ss*0.8);_c1.lerp(_c2,d);sun.color.copy(_c1);let si=lerp(NS.i,MP.sun.i*(1-0.45*ss),d);
+ _c1.set(NH[0]);_c2.set(MP.hemi[0]);hemi.color.copy(_c1.lerp(_c2,d));_c1.set(NH[1]);_c2.set(MP.hemi[1]);hemi.groundColor.copy(_c1.lerp(_c2,d));let hi=lerp(NH[2],MP.hemi[2],d);
+ _c1.set(NF[0]);_c2.set(MP.fog[0]);_c3.set(0xd88a5a);_c2.lerp(_c3,ss*0.5);sc.fog.color.copy(_c1.lerp(_c2,d));let fn=lerp(NF[1],MP.fog[1],d),ff=lerp(NF[2],MP.fog[2],d);
+ let cl=lerp(N.cl,S.cl,d),gnd=lerpA(N.gnd,S.gnd,d);
+ if(wx==='rain'){const g=[.42,.46,.5].map(v=>v*(0.15+0.85*d));top=lerpA(top,g,.85);hor=lerpA(hor,g.map(v=>v*1.25),.85);cl=1;si*=0.28;hi*=0.85;_c1.setRGB(...g.map(v=>v*1.1));sc.fog.color.lerp(_c1,.8);fn=30;ff=Math.min(ff,1600);_c1.set(0x9aa3ad);hemi.color.lerp(_c1,.6)}
+ if(wx==='sand'){const g=[.78,.56,.34].map(v=>v*(0.2+0.8*d));top=lerpA(top,g.map(v=>v*.9),.8);hor=lerpA(hor,g,.9);si*=0.45;_c1.setRGB(...g);sc.fog.color.lerp(_c1,.92);fn=4;ff=Math.min(ff,330);_c1.set(0xd0a070);hemi.color.lerp(_c1,.5)}
+ skyU.top.value.set(...top);skyU.hor.value.set(...hor);skyU.gnd.value.set(...gnd);skyU.cl.value=cl;skyU.night.value=d<0.3?1:0;
+ sun.intensity=si;hemi.intensity=hi;sc.fog.near=fn;sc.fog.far=ff;r.toneMappingExposure=lerp(MAPS.night.exp,MP.exp,d);headL.intensity=(1-d)*2500;
+ envT-=dt;if(envT<=0){envT=mode==='cycle'?3:1e9;const es=new THREE.Scene();es.add(new THREE.Mesh(new THREE.SphereGeometry(100,24,12),skyM));if(envRT)envRT.dispose();envRT=pmrem.fromScene(es,0.02);sc.environment=envRT.texture}}
+function weatherFx(dt){const wx=state.weather;
+ if(wx==='rain'&&!rainFx){const N=3200,pos=new Float32Array(N*6),o=[];for(let i=0;i<N;i++)o.push([(rnd()-.5)*70,rnd()*30-8,(rnd()-.5)*70]);const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const m=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xb8c6d4,transparent:true,opacity:.45,depthWrite:false}));m.frustumCulled=false;sc.add(m);rainFx={m,o,pos}}
+ if(wx==='sand'&&!sandFx){const N=3500,pos=new Float32Array(N*3),o=[];for(let i=0;i<N;i++)o.push([(rnd()-.5)*80,rnd()*14-2,(rnd()-.5)*80]);const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const m=new THREE.Points(g,new THREE.PointsMaterial({color:0xc89a62,size:0.12,transparent:true,opacity:.6,depthWrite:false}));m.frustumCulled=false;sc.add(m);sandFx={m,o,pos}}
+ if(rainFx)rainFx.m.visible=wx==='rain';if(sandFx)sandFx.m.visible=wx==='sand';
+ const C=cam.position,inCab=state.camMode===0&&TR.cab.hide&&state.mode!=='crash';
+ if(wx==='rain'){const {o,pos}=rainFx;for(let i=0;i<o.length;i++){const q=o[i];q[1]-=24*dt;q[0]+=2*dt;if(q[1]<-8){q[1]+=30;q[0]=(rnd()-.5)*70;q[2]=(rnd()-.5)*70}if(q[0]>35)q[0]-=70;
+   const x=C.x+q[0],y=C.y+q[1],z=C.z+q[2];const hide=inCab&&q[0]*q[0]+q[2]*q[2]<6.5&&q[1]>-2.2;const L=hide?0:0.75;pos[i*6]=x;pos[i*6+1]=y;pos[i*6+2]=z;pos[i*6+3]=x+0.06;pos[i*6+4]=y+L;pos[i*6+5]=z}rainFx.m.geometry.attributes.position.needsUpdate=true}
+ if(wx==='sand'){const {o,pos}=sandFx;const wdx=Math.cos(1.1),wdz=Math.sin(1.1);for(let i=0;i<o.length;i++){const q=o[i];q[0]+=wdx*16*dt;q[2]+=wdz*16*dt;q[1]+=Math.sin(state.time*3+i)*0.5*dt;for(const k of[0,2]){if(q[k]>40)q[k]-=80;if(q[k]<-40)q[k]+=80}
+   pos[i*3]=C.x+q[0];pos[i*3+1]=C.y+q[1];pos[i*3+2]=C.z+q[2]}sandFx.m.geometry.attributes.position.needsUpdate=true}}
 /* ================= 3D cab ================= */
-const cabG=new THREE.Group();cabG.visible=false;sc.add(cabG);let cabKind=null,cabGauge=null,cabLever=null,cabGT=0;
+const cabG=new THREE.Group();cabG.visible=false;sc.add(cabG);let cabKind=null,cabGauge=null,cabLever=null,cabGT=0,cabWipers=[];
 const STEAMK=['steam','crimson','stream','green','giant'];
 function cabBox(w,h,d,m,x,y,z,rx=0){const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);b.rotation.x=rx;cabG.add(b);return b}
 function buildCab(kind){while(cabG.children.length){const o=cabG.children.pop();o.traverse(q=>{if(q.geometry)q.geometry.dispose()})}cabKind=kind;
@@ -1123,7 +1161,7 @@ function buildCab(kind){while(cabG.children.length){const o=cabG.children.pop();
   cabBox(3.0,0.95,0.12,wall,0,-0.86,1.25);cabBox(3.0,0.42,0.12,wall,0,0.82,1.25);cabBox(0.28,1.05,0.14,trim,-1.36,0.12,1.24);cabBox(0.28,1.05,0.14,trim,1.36,0.12,1.24);cabBox(0.07,1.05,0.1,trim,0,0.12,1.24);
   const ws=new THREE.Mesh(new THREE.PlaneGeometry(2.5,1.0),glass);ws.position.set(0,0.12,1.22);ws.rotation.y=Math.PI;cabG.add(ws);
   const visor=new THREE.Mesh(new THREE.PlaneGeometry(1.1,0.22),new THREE.MeshStandardMaterial({color:0x101418,transparent:true,opacity:.55,roughness:.4,depthWrite:false}));visor.position.set(-0.62,0.5,1.17);visor.rotation.set(0.25,Math.PI,0);cabG.add(visor);
-  for(const x of[-0.62,0.62]){const w=cabBox(0.95,0.025,0.02,trim,x+0.12,-0.32,1.18);w.rotation.z=x<0?0.5:-0.5}
+  cabWipers=[];for(const x of[-0.62,0.62]){const w=new THREE.Group();w.position.set(x-0.35,-0.36,1.18);const bl=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.025,0.02),trim);bl.position.x=0.47;w.add(bl);w.rotation.z=0.12;cabG.add(w);cabWipers.push(w)}
   // side walls with windows
   for(const sg of[-1,1]){const x=sg*1.48;cabBox(0.1,1.05,2.9,wall,x,-0.82,-0.2);cabBox(0.1,0.45,2.9,wall,x,0.78,-0.2);cabBox(0.1,0.8,0.5,wall,x,0.15,-1.4);cabBox(0.08,0.8,0.06,trim,x,0.15,-0.6);
    const sw=new THREE.Mesh(new THREE.PlaneGeometry(1.8,0.8),glass);sw.position.set(x*0.99,0.15,0.1);sw.rotation.y=-sg*Math.PI/2;cabG.add(sw)}
@@ -1168,7 +1206,7 @@ function drawGauges(){const g=cabGauge.c.getContext('2d'),W=1024,H=400;const v=M
  cabGauge.t.needsUpdate=true}
 function updateCab(on,p,h,dt){if(!on){cabG.visible=false;return}const want=STEAMK.includes(trainKey)?'steam':'modern';if(cabKind!==want||!cabGauge)buildCab(want);cabG.visible=true;
  cabG.position.copy(p);cabG.rotation.set(0,h,0);cabG.rotateZ(-cantAt(state.s));cabLever.rotation.x=(cabKind==='steam'?-0.5:-0.55)*state.lever;
- cabGT-=dt;if(cabGT<=0){cabGT=1/12;drawGauges()}}
+ for(const w of cabWipers)w.rotation.z=state.weather==='rain'?0.12+(0.5-0.5*Math.cos(state.time*2.4))*1.9:0.12;cabGT-=dt;if(cabGT<=0){cabGT=1/12;drawGauges()}}
 
 /* ================= cameras ================= */
 const CAMS=['الكابينة','حرة','جنب السكة','طيران حر'];const flyKeys=new Set();
@@ -1226,6 +1264,11 @@ renderMapPick();
 function pickMap(k){if(k===mapKey)return;mapKey=k;MP=MAPS[k];try{localStorage.setItem('desertMap',k)}catch(e){}buildTrack();buildWorld();buildTrain(trainKey);$('hStation').textContent=STATIONS[1].name;state.sideCam=null;showMenu();
  document.querySelectorAll('#mapPick .tcard').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===k))}
 $('hStation').textContent=STATIONS[1].name;
+{const WX={clear:'صحو',rain:'مطر',sand:'عاصفة رملية'},TD={day:'نهار',night:'ليل',cycle:'يتغير وأنت تسوق'};
+ try{const w=localStorage.getItem('desertWx');if(WX[w])state.weather=w;const t=localStorage.getItem('desertTod');if(TD[t])state.todMode=t}catch(e){}
+ const mk=(id,obj,key,ls)=>{$(id).innerHTML=Object.entries(obj).map(([k,n])=>`<button class="tcard" data-k="${k}" aria-pressed="${k===state[key]}"><b>${n}</b></button>`).join('');
+  document.querySelectorAll('#'+id+' .tcard').forEach(b=>b.onclick=()=>{state[key]=b.dataset.k;try{localStorage.setItem(ls,b.dataset.k)}catch(e){}if(key==='todMode')state.tod=b.dataset.k==='cycle'?0.6:0.45;document.querySelectorAll('#'+id+' .tcard').forEach(x=>x.setAttribute('aria-pressed',x===b))})};
+ mk('wxPick',WX,'weather','desertWx');mk('todPick',TD,'todMode','desertTod');state.tod=state.todMode==='cycle'?0.6:0.45}
 $('qPick').innerHTML=Object.entries(QUALS).map(([k,q])=>`<button class="tcard" data-q="${k}" aria-pressed="${k===qualKey}"><b>${q.name}</b></button>`).join('');
 document.querySelectorAll('#qPick .tcard').forEach(b=>b.onclick=()=>{const k=b.dataset.q;if(k===qualKey)return;qualKey=k;QUAL=QUALS[k];try{localStorage.setItem('desertQual2',k)}catch(e){}
  curDpr=LQ?0.6:Math.min(devicePixelRatio,QUAL.dpr);r.setPixelRatio(curDpr);r.setSize(innerWidth,innerHeight);sun.shadow.mapSize.set(QUAL.sh,QUAL.sh);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null}
@@ -1361,7 +1404,7 @@ let fpsN=0,fpsT=performance.now();
 function frame(now){if(now-last<1000/62){requestAnimationFrame(frame);return}
  fpsN++;if(now-fpsT>2500){const fps=fpsN*1000/(now-fpsT);fpsN=0;fpsT=now;window.__fps=fps;}
  const dt=Math.min(0.05,(now-last)/1000);last=now;if(!frame.st||now-frame.st>250){frame.st=now;streamChunks()}
- if(state.mode==='drive'){for(let i=0;i<4;i++)physics(dt/4);state.time+=dt;updateAI(dt);checkRules(dt)}updateSignals();
+ if(state.mode==='drive'){for(let i=0;i<4;i++)physics(dt/4);state.time+=dt;updateAI(dt);checkRules(dt)}updateSignals();envUpdate(dt);
  if(state.mode==='crash')crashUpdate(dt);
  else{placeTrain(state.s);updateCamera(dt);
   if(MP.sky.night&&loco.front){loco.g.updateMatrixWorld();cv.copy(loco.front);loco.g.localToWorld(cv);headL.position.copy(cv);headL.target.position.copy(atL(state.s+90,0.6))}
