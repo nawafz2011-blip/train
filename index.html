@@ -1096,8 +1096,9 @@ function couple(A,B,dt,idx){if(A.broken||(A.onTrack&&B.onTrack))return;
  if(A.onTrack!==B.onTrack){const on=A.onTrack?A:B;const comp=pa.clone().sub(pb).dot(fwdOf(B));
   const frP=A.onTrack?pb:pa,sc=A.onTrack?A.sF-A.len-GAP/2:B.sF+GAP/2;const lat=Math.abs(frP.clone().sub(atL(sc)).dot(sideV(sc)));
   let pullOff=false;if(on.vT>3&&comp<-0.35){const fr0=A.onTrack?B:A;const tf=fwd(on.sF-on.len/2);const vf=fr0.rb.vel.x*tf.x+fr0.rb.vel.z*tf.z;const L=Math.abs(on.vT-vf)*0.35;if(L>state.cplMax)state.cplMax=L;
-   if(L>RAIL_HOLD*(state.sharpCrash?2:1))pullOff=true;else{const nv=Math.max(0,(on.vT+vf)/2);fr0.rb.vel.addScaledVector(tf,nv-vf);for(const c of cars)if(c.onTrack)c.vT=Math.min(c.vT,nv+0.3);if(L>2&&(on.ccd||0)<=0){impactSnd(Math.min(1,L/12));on.ccd=0.5}}}
+   if(L>Math.max(RAIL_HOLD*2,TR.cpl*3)){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);return}if(L>RAIL_HOLD*(state.sharpCrash?2:1))pullOff=true;else{const nv=Math.max(0,(on.vT+vf)/2);fr0.rb.vel.addScaledVector(tf,nv-vf);for(const c of cars)if(c.onTrack)c.vT=Math.min(c.vT,nv+0.3);if(L>2&&(on.ccd||0)<=0){impactSnd(Math.min(1,L/12));on.ccd=0.5}}}
   else if(!A.sideDone&&(lat>1.0||dist>1.5)){A.sideDone=true;const L=on.vT*0.35;if(L>state.cplMax)state.cplMax=L;
+   if(L>Math.max(RAIL_HOLD*2,TR.cpl*3)){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);toast(`انقطعت الوصلة ${idx}–${idx+1} من قوة الشد (${L.toFixed(0)})`,2200);return}
    if(!state.sharpCrash&&L>RAIL_HOLD)pullOff=true;
    else if(L>TR.cpl){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);toast(`انقطعت الوصلة ${idx}–${idx+1} (الشد ${L.toFixed(1)}، قوتها ${TR.cpl})، والباقي ظل على السكة`,2800);return}
    else toast(`السكة مسكت العربة ${on===A?idx:idx+1} (الشد ${L.toFixed(1)})`,2200)}
