@@ -385,6 +385,36 @@ function canvasTex(sz,draw){const c=document.createElement('canvas');c.width=c.h
 const ballastTex=canvasTex(512,(g,s)=>{g.fillStyle='#6f6a64';g.fillRect(0,0,s,s);for(let i=0;i<9000;i++){const x=rnd()*s,y=rnd()*s,rr=2+rnd()*6,v=70+rnd()*90|0;g.fillStyle=`rgb(${v+8},${v+3},${v})`;g.beginPath();g.ellipse(x,y,rr,rr*(.6+rnd()*.4),rnd()*3,0,7);g.fill();g.fillStyle='rgba(255,255,255,.12)';g.beginPath();g.ellipse(x-rr*.3,y-rr*.3,rr*.4,rr*.3,0,0,7);g.fill()}});
 const grainTex=canvasTex(1024,(g,s)=>{g.fillStyle='#e6e6e6';g.fillRect(0,0,s,s);for(let i=0;i<40000;i++){g.fillStyle=rnd()<.5?'rgba(90,90,90,.09)':'rgba(255,255,255,.12)';g.fillRect(rnd()*s,rnd()*s,2+rnd()*4,2+rnd()*4)}
  for(let k=0;k<60;k++){g.strokeStyle='rgba(80,80,80,.08)';g.lineWidth=3;g.beginPath();const y0=rnd()*s;for(let x=0;x<=s;x+=16)g.lineTo(x,y0+Math.sin(x*.02+k)*10);g.stroke()}});
+// detailed ground: a height field per ground type -> colour detail + normal map (bumps, pebbles, ripples, grass)
+const GTEX={};
+function makeGroundTex(kind){if(GTEX[kind])return GTEX[kind];const N=512;const H=new Float32Array(N*N),C=new Float32Array(N*N*3).fill(1);let sd=kind.length*977+13;const R=()=>{sd=(sd*16807)%2147483647;return sd/2147483647};
+ const lat=(per)=>{const v=new Float32Array(per*per);for(let i=0;i<v.length;i++)v[i]=R();return(x,y)=>{const fx=x/N*per,fy=y/N*per,ix=Math.floor(fx),iy=Math.floor(fy),tx=fx-ix,ty=fy-iy,sx=tx*tx*(3-2*tx),sy=ty*ty*(3-2*ty);const a=v[(iy%per)*per+ix%per],b=v[(iy%per)*per+(ix+1)%per],c=v[((iy+1)%per)*per+ix%per],d=v[((iy+1)%per)*per+(ix+1)%per];return a+(b-a)*sx+(c-a)*sy+(a-b-c+d)*sx*sy}};
+ const o=[lat(4),lat(8),lat(16),lat(32),lat(64),lat(128)];const fbm=(x,y,a0)=>{let v=0,a=a0||.5,t=0;for(const f of o){v+=f(x,y)*a;t+=a;a*=.6}return v/t};
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x;const f=fbm(x,y);let h=0,c=1;
+  if(kind==='sand'){const w=Math.sin((y+o[1](x,y)*140+o[3](x,y)*20)*Math.PI*2/40)*o[0](x,y);h=0.16*w+0.5*f+0.25*o[5](x,y);c=0.87+0.17*f+0.02*w}
+  else if(kind==='snow'){h=0.6*f+0.1*o[5](x,y);c=0.94+0.08*f}
+  else if(kind==='grass'){h=0.5*f+0.3*o[5](x,y);c=0.8+0.3*f}
+  else{h=0.55*f+0.3*o[5](x,y);c=0.82+0.24*f}
+  H[i]=h;C[i*3]=C[i*3+1]=C[i*3+2]=c}
+ const dot=(cx,cy,r,dh,col)=>{for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){const d=(x*x+y*y)/(r*r);if(d>1)continue;const i=(((cy+y)%N+N)%N)*N+(((cx+x)%N+N)%N);const k=Math.sqrt(1-d);H[i]+=dh*k;if(col){C[i*3]=C[i*3]*(1-k*.7)+col[0]*k*.7;C[i*3+1]=C[i*3+1]*(1-k*.7)+col[1]*k*.7;C[i*3+2]=C[i*3+2]*(1-k*.7)+col[2]*k*.7}}};
+ if(kind!=='snow'){const nP=kind==='grass'?500:kind==='sand'?260:900;for(let k=0;k<nP;k++){const g=0.55+R()*0.6;dot(R()*N|0,R()*N|0,2+R()*R()*7|0,0.5+R()*0.6,[g,g*.97,g*.92])}}
+ if(kind==='grass'){for(let k=0;k<26000;k++){let x=R()*N,y=R()*N;const L=5+R()*9,a=-1.57+(R()-.5)*1.1,g=R();const col=g<.12?[0.78,0.68,0.42]:g<.55?[1.12,1.18,0.9]:[0.72,0.82,0.62];for(let t=0;t<L;t++){x+=Math.cos(a);y+=Math.sin(a);const i=(((y|0)%N+N)%N)*N+(((x|0)%N+N)%N);H[i]+=0.05*(1-t/L)+0.02;C[i*3]=col[0]*(0.85+0.15*t/L);C[i*3+1]=col[1]*(0.85+0.15*t/L);C[i*3+2]=col[2]*(0.85+0.15*t/L)}}}
+ const cv=document.createElement('canvas');cv.width=cv.height=N;const g=cv.getContext('2d');const im=g.createImageData(N,N);
+ const nv=document.createElement('canvas');nv.width=nv.height=N;const gn=nv.getContext('2d');const nm=gn.createImageData(N,N);const st=kind==='grass'?2.2:kind==='snow'?1.2:3.2;
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x;const hx=H[y*N+(x+1)%N]-H[y*N+(x+N-1)%N],hy=H[((y+1)%N)*N+x]-H[((y+N-1)%N)*N+x];let nx=-hx*st*8,ny=-hy*st*8,nz=1;const l=Math.hypot(nx,ny,nz);nx/=l;ny/=l;nz/=l;
+  nm.data[i*4]=(nx*.5+.5)*255;nm.data[i*4+1]=(-ny*.5+.5)*255;nm.data[i*4+2]=(nz*.5+.5)*255;nm.data[i*4+3]=255;
+  for(let k=0;k<3;k++)im.data[i*4+k]=Math.max(0,Math.min(255,C[i*3+k]*218));im.data[i*4+3]=255}
+ g.putImageData(im,0,0);gn.putImageData(nm,0,0);const map=new THREE.CanvasTexture(cv),nrm=new THREE.CanvasTexture(nv);for(const t of[map,nrm]){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=8}map.colorSpace=THREE.SRGBColorSpace;
+ return GTEX[kind]={map,nrm}}
+// break up visible tiling: blend the detail texture with itself at a second, rotated scale
+function antiTile(m){m.onBeforeCompile=sh=>{sh.fragmentShader=sh.fragmentShader.replace('#include <map_fragment>','#ifdef USE_MAP\n vec4 sampledDiffuseColor=texture2D(map,vMapUv);vec2 uv2=mat2(.8,-.6,.6,.8)*vMapUv*.23+vec2(.37,.61);vec4 s2=texture2D(map,uv2);vec4 s3=texture2D(map,vMapUv*.031+vec2(.13,.71));\n sampledDiffuseColor.rgb=(sampledDiffuseColor.rgb*.55+s2.rgb*.45)*(0.8+0.4*s3.r);diffuseColor*=sampledDiffuseColor;\n#endif')};m.customProgramCacheKey=()=>'antitile';return m}
+function groundKind(){const a=MP.gA;if(a[0]>215&&a[2]>215)return'snow';if(a[1]>a[0]&&a[1]>=a[2])return'grass';if(MP.strata||MP.cliff)return'rock';return'sand'}
+// ballast: individual stones with their own shading and a normal map
+const ballastNrm=(()=>{const N=512;const H=new Float32Array(N*N);let sd=91;const R=()=>{sd=(sd*16807)%2147483647;return sd/2147483647};
+ for(let k=0;k<5200;k++){const cx=R()*N,cy=R()*N,r=4+R()*8,e=.6+R()*.4,a=R()*3;const ca=Math.cos(a),sa=Math.sin(a);for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){const u=(x*ca+y*sa)/r,v=(-x*sa+y*ca)/(r*e);const d=u*u+v*v;if(d>1)continue;const i=((((cy+y)|0)%N+N)%N)*N+((((cx+x)|0)%N+N)%N);H[i]=Math.max(H[i],Math.sqrt(1-d)*r*0.12)}}
+ const c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');const im=g.createImageData(N,N);
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=y*N+x;const hx=H[y*N+(x+1)%N]-H[y*N+(x+N-1)%N],hy=H[((y+1)%N)*N+x]-H[((y+N-1)%N)*N+x];let nx=-hx*1.4,ny=-hy*1.4,nz=1;const l=Math.hypot(nx,ny,nz);im.data[i*4]=(nx/l*.5+.5)*255;im.data[i*4+1]=(-ny/l*.5+.5)*255;im.data[i*4+2]=(nz/l*.5+.5)*255;im.data[i*4+3]=255}
+ g.putImageData(im,0,0);const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=8;return t})();
 const concTex=canvasTex(128,(g,s)=>{g.fillStyle='#b9b5ad';g.fillRect(0,0,s,s);for(let i=0;i<1500;i++){g.fillStyle=`rgba(${rnd()<.5?60:255},${rnd()<.5?60:255},60,.06)`;g.fillRect(rnd()*s,rnd()*s,2,2)}});
 
 /* ================= world ================= */
@@ -436,7 +466,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
    if(MP.sea&&side>0)h=Math.min(h,0.4)-THREE.MathUtils.smoothstep(side,55,240)*12;
    return h-0.04};
   // ground tiles: fine near the track, coarse far away; each tile has a skirt so different sizes meet without gaps
-  const tmat=new THREE.MeshStandardMaterial({map:grainTex,bumpMap:grainTex,bumpScale:2,roughness:1,vertexColors:true});tmat.userData.keepTex=1;
+  const GT=makeGroundTex(groundKind());const tmat=antiTile(new THREE.MeshStandardMaterial({map:GT.map,normalMap:GT.nrm,normalScale:new THREE.Vector2(1.1,1.1),roughness:1,vertexColors:true}));tmat.userData.keepTex=1;
   const lin=v=>Math.pow(v/255,2.2);const A=MP.gA.map(lin),Bc=MP.gB.map(lin);
   const tile=(x0,z0,size,n)=>{const N1=n+1,pos=[],uvs=[],idx=[];for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){const x=x0+size*i/n,z=z0+size*j/n;pos.push(x,groundH(x,z),z);uvs.push(x/5,-z/5)}
    for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=j*N1+i,b=a+1,c=a+N1,d=c+1;idx.push(a,c,b,b,c,d)}
@@ -462,7 +492,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
   const idx=[];for(let i=0;i<N;i++){const a=i*2;idx.push(a,a+2,a+1,a+1,a+2,a+3)}geo.setAttribute('position',new THREE.Float32BufferAttribute(v,3));geo.setIndex(idx);geo.computeVertexNormals();
   world.add(new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:MP.mtn[k],roughness:1,side:THREE.DoubleSide})))}
  // track
- {const ballastM=new THREE.MeshStandardMaterial({map:ballastTex,bumpMap:ballastTex,bumpScale:4,roughness:.95,side:THREE.DoubleSide});
+ {const ballastM=new THREE.MeshStandardMaterial({map:ballastTex,normalMap:ballastNrm,normalScale:new THREE.Vector2(1.3,1.3),roughness:.95,side:THREE.DoubleSide});
   const railM=new THREE.MeshStandardMaterial({color:0x6e625a,metalness:.7,roughness:.6,side:THREE.DoubleSide});
   const railTopM=new THREE.MeshStandardMaterial({color:0xe8e8ea,metalness:1,roughness:.18,side:THREE.DoubleSide});
   if(MP.elev){const emb=new THREE.MeshStandardMaterial({color:new THREE.Color().setRGB(...MP.gA.map(v=>v/255*0.85),THREE.SRGBColorSpace),map:grainTex,roughness:1,side:THREE.DoubleSide});sweep([[-31,-9],[-17,-2.5],[-8.1,0.0],[3.4,0.0],[12,-2.5],[26,-9]],emb,0,0,TOTAL,4,0.2,0.2)}
@@ -474,7 +504,7 @@ function buildWorld(){chunks=[];OBS=[];OGRID=new Map();BROKEN=[];sc.remove(world
   {const ob=new THREE.Object3D(),M4=[];for(let i=0;i<Math.floor(TOTAL/0.65);i++){const s=i*0.65;ob.position.copy(at(s,0,0.62));ob.rotation.order='YXZ';ob.rotation.set(0,headingAt(s),-cantAt(s));ob.updateMatrix();M4.push(ob.matrix.clone())}
    addInst(new THREE.BoxGeometry(2.6,0.2,0.3),new THREE.MeshStandardMaterial({map:concTex,color:0x8f8b84,roughness:.9}),M4,false,'near')}}
  // second line, crossovers (both diagonals) and a signal before each
- {const ballastM=new THREE.MeshStandardMaterial({map:ballastTex,bumpMap:ballastTex,bumpScale:4,roughness:.95,side:THREE.DoubleSide});
+ {const ballastM=new THREE.MeshStandardMaterial({map:ballastTex,normalMap:ballastNrm,normalScale:new THREE.Vector2(1.3,1.3),roughness:.95,side:THREE.DoubleSide});
   const railM=new THREE.MeshStandardMaterial({color:0x6e625a,metalness:.7,roughness:.6,side:THREE.DoubleSide}),railTopM=new THREE.MeshStandardMaterial({color:0xe8e8ea,metalness:1,roughness:.18,side:THREE.DoubleSide});
   const RP=[[[-0.075,0.72],[-0.075,0.74],[-0.018,0.76],[-0.018,0.83],[-0.036,0.84],[-0.036,0.892]],[[0.036,0.892],[0.036,0.84],[0.018,0.83],[0.018,0.76],[0.075,0.74],[0.075,0.72]]];const RT=[[-0.036,0.892],[-0.03,0.9],[0.03,0.9],[0.036,0.892]];
   const line=(off,s0,s1,ds,ballast)=>{if(ballast)sweep([[-3.4,0.02],[-2.1,0.55],[2.1,0.55],[3.4,0.02]],ballastM,off,s0,s1,ds,0.33,0.33);for(const rx of[-0.7175,0.7175]){const o=typeof off==='function'?(q=>off(q)+rx):off+rx;for(const pr of RP)sweep(pr,railM,o,s0,s1,ds);sweep(RT,railTopM,o,s0,s1,ds)}};
@@ -962,7 +992,7 @@ function crashVisuals(dt){obsAnimate(dt);cutUpdate();for(const c of cars.concat(
    b.y=clamp(b.y+b.vy*dt,-0.75,0.75);b.x=clamp(b.x+b.vx*dt,-0.28,0.28);b.g.rotation.set(0,b.y,b.x)}}
  for(const d of debris){d.vel.y-=9.81*dt;d.o.position.addScaledVector(d.vel,dt);const w=d.ang.length();if(w>1e-4){tmpQ.setFromAxisAngle(tmpV.copy(d.ang).divideScalar(w),w*dt);d.o.quaternion.premultiply(tmpQ)}
   d.gy=groundH(d.o.position.x,d.o.position.z);if(!d.free&&d.vel.y>2)d.vel.y=2;if(d.o.position.y<d.gy+0.2){d.o.position.y=d.gy+0.2;{const X=d.o.position.x,Z=d.o.position.z,hx=groundH(X+1.5,Z),hz=groundH(X,Z+1.5);const n=new THREE.Vector3(-(hx-d.gy)/1.5,1,-(hz-d.gy)/1.5).normalize();const vn=d.vel.dot(n);if(vn<0)d.vel.addScaledVector(n,-vn*1.2)}d.vel.y=Math.min(d.vel.y,1);const hv=Math.hypot(d.vel.x,d.vel.z);if(hv>1e-3){const kk=Math.max(0,hv-8*dt)/hv;d.vel.x*=kk;d.vel.z*=kk}d.ang.multiplyScalar(Math.max(0,1-3*dt))}}}
-function fxRestore(){obsRestore();for(const d of debris){if(!d.home){sc.remove(d.o);continue}d.home.parent.add(d.o);d.o.position.copy(d.home.pos);d.o.quaternion.copy(d.home.quat);d.o.scale.copy(d.home.scl)}debris=[];
+function fxRestore(){clodN=0;obsRestore();for(const d of debris){if(!d.home){sc.remove(d.o);continue}d.home.parent.add(d.o);d.o.position.copy(d.home.pos);d.o.quaternion.copy(d.home.quat);d.o.scale.copy(d.home.scl)}debris=[];
  for(const c of cars){c.g.traverse(o=>{if(o.userData.orig){const pa=o.geometry.attributes.position;pa.array.set(o.userData.orig);pa.needsUpdate=true;if(o.userData.origC){const ca=o.geometry.attributes.color;ca.array.set(o.userData.origC);ca.needsUpdate=true;delete o.userData.origC}o.geometry.computeVertexNormals();delete o.userData.orig}});(c.g.userData.bogies||[]).concat(c.g.userData.pony?[c.g.userData.pony]:[]).forEach(b=>b.g.rotation.set(0,0,0))}}
 // head-on above what the bodies can take -> fuel explosion
 const BOOM_KMH=150;
@@ -1018,7 +1048,7 @@ function startCrash(kind,why,firstIdx=0,ai=null){if(state.mode!=='drive')return;
   const h=c.half;c.onTrack=true;c.sF=s-c.frontOff;c.vT=v;c.gs=c.sF-c.len/2;setGround(c);fxInit(c);c.broken=false;c.sideDone=false;c.cf=0;c.rb={vel:fwd(c.sF-c.len/2).multiplyScalar(v),ang:new THREE.Vector3(),Ib:new THREE.Vector3(((2*h.y)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.y)**2)/12)}});
  const c=cars[firstIdx];const cs=c.sF-c.len/2;const f=fwd(cs),sv=sideV(cs);
  if(kind==='curve'){const dirK=Math.sign(K[clamp(Math.round(cs),0,TOTAL)])||1;const out=sv.clone().multiplyScalar(-dirK);
-  freeCar(c,f.clone().multiplyScalar(v).addScaledVector(out,v*0.14).setY(1.0),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()).addScaledVector(UP,-0.25*dirK))}
+  freeCar(c,f.clone().multiplyScalar(v).addScaledVector(out,Math.min(6,v*0.08)).setY(0.7),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()).addScaledVector(UP,-0.25*dirK))}
  else if(kind==='side'){const av=ai?ai.v:20;freeCar(c,f.clone().multiplyScalar(v*0.8).addScaledVector(sv,av*0.3+3).setY(0.6),f.clone().multiplyScalar(0.8).addScaledVector(UP,-0.5))}
  else{freeCar(c,f.clone().multiplyScalar(v*0.12).setY(1.8),sv.clone().multiplyScalar(-0.7).addScaledVector(UP,(rnd()-.5)*0.6))}
  state.crashKind=kind;{const kk=Math.abs(K[clamp(Math.round(cars[firstIdx].sF-cars[firstIdx].len/2),0,TOTAL)]);state.sharpCrash=kind==='curve'&&kk>1/200}state.crashV0=Math.max(v,ai?ai.v:0);if(ai){wreckAI(ai,kind==='side'?0.6:0.15);impactSnd(1);impactSnd(1);const cl=(v+ai.v)*KMH;if(kind==='collision'&&cl>=BOOM_KMH){const P=c.pivot.position.clone().lerp(ai.list[0].pivot.position,0.5);explode(P,Math.min(1.6,0.8+(cl-BOOM_KMH)/150));state.crashWhy+=` السرعة بينكم ${Math.round(cl)} كم/س، أكثر من ${BOOM_KMH} اللي تتحمله القطارات، فانفجر الوقود.`}}state.cplMax=0;state.cplBroken=[];state.v=0;state.force=0;state.crashCenter=c.pivot.position.clone();state.crashAng=Math.atan2(cam.position.x-state.crashCenter.x,cam.position.z-state.crashCenter.z)}
@@ -1028,6 +1058,12 @@ function setGround(c){c.tp=c.laneFix!==undefined?at(c.gs,c.laneFix):atL(c.gs);c.
 function groundUnder(c,wp){const off=Math.abs((wp.x-c.tp.x)*c.sv.x+(wp.z-c.tp.z)*c.sv.z);if(off<1.0)return c.base+0.9;if(off<3.4)return c.base+0.55*Math.min(1,(3.4-off)/1.3);let g=groundH(wp.x,wp.z);if(MP.elev){const emb=off<12?c.base-2.5*(off-3.4)/8.6:off<26?c.base-2.5-6.5*(off-12)/14:-1e9;g=Math.max(g,emb)}else if(off<14)g=Math.max(g,c.base);return g}
 // real slope of the ground under a point (flat on the track bed)
 function groundN(c,wp){const off=Math.abs((wp.x-c.tp.x)*c.sv.x+(wp.z-c.tp.z)*c.sv.z);if(off<14)return UP;const h0=groundH(wp.x,wp.z),hx=groundH(wp.x+1.5,wp.z),hz=groundH(wp.x,wp.z+1.5);return new THREE.Vector3(-(hx-h0)/1.5,1,-(hz-h0)/1.5).normalize()}
+// clods of earth and ballast torn up where a car digs in sideways
+let clodG=null,clodM=null,clodN=0;
+function dirtClod(at,vel){if(clodN>160)return;clodN++;if(!clodG){clodG=[new THREE.DodecahedronGeometry(0.45,0),new THREE.IcosahedronGeometry(0.35,0)];clodM=[new THREE.MeshStandardMaterial({color:new THREE.Color(MP.gB?`rgb(${MP.gB.map(v=>Math.round(v*0.7)).join(',')})`:'#6b5a45'),roughness:1}),new THREE.MeshStandardMaterial({color:0x7d776f,roughness:.95})]}
+ const o=new THREE.Mesh(clodG[clodN%2],clodM[clodN%3?0:1]);const sc0=0.6+rnd()*1.4;o.scale.set(sc0,sc0*(0.6+rnd()*0.5),sc0);o.castShadow=true;o.position.copy(at).add(new THREE.Vector3((rnd()-.5)*2,0.4,(rnd()-.5)*2));sc.add(o);
+ debris.push({o,home:null,free:1,vel:new THREE.Vector3(vel.x*0.35+(rnd()-.5)*4,2+rnd()*3.5,vel.z*0.35+(rnd()-.5)*4),ang:new THREE.Vector3((rnd()-.5)*8,(rnd()-.5)*8,(rnd()-.5)*8),gy:0});
+ for(let q=0;q<2;q++)emit(dust,o.position.clone(),new THREE.Vector3((rnd()-.5)*3,1+rnd()*2,(rnd()-.5)*3),2+rnd(),2.5,9)}
 function rbStep(c,dt){const rb=c.rb,p=c.pivot;if(!p||!rb)return;c.impCd=(c.impCd||0)-dt;
  rb.vel.y-=9.81*dt;p.position.addScaledVector(rb.vel,dt);const w=rb.ang.length();if(w>1e-5){tmpQ.setFromAxisAngle(tmpV.copy(rb.ang).divideScalar(w),w*dt);p.quaternion.premultiply(tmpQ).normalize()}
  const Iw=invI(c);let contact=false,low=null;
@@ -1035,7 +1071,7 @@ function rbStep(c,dt){const rb=c.rb,p=c.pivot;if(!p||!rb)return;c.impCd=(c.impCd
   const vc=rb.vel.clone().add(rb.ang.clone().cross(r));const vn=vc.dot(gn);if(vn<-2.5&&c.impCd<=0){impactSnd(Math.min(1,-vn/9));crashFx(c,r,Math.min(1,-vn/9));c.impCd=0.4}if(vn<0){const rn=r.clone().cross(gn);const j=-1.25*vn/(1+rn.clone().applyMatrix3(Iw).dot(rn));rb.vel.addScaledVector(gn,j);rb.ang.add(rn.applyMatrix3(Iw).multiplyScalar(j));
    const vt=vc.clone().addScaledVector(gn,-vn);const vtl=vt.length();if(vtl>1e-3){const t=vt.divideScalar(vtl).negate();const rt=r.clone().cross(t);const jt=Math.min(0.55*j,vtl/(1+rt.clone().applyMatrix3(Iw).dot(rt)));rb.vel.addScaledVector(t,jt);rb.ang.add(rt.applyMatrix3(Iw).multiplyScalar(jt))}}
   if(!low||wp.y<low.y)low=wp}}
- if(contact){const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>1e-3){const k=Math.max(0,hv-6.5*dt)/hv;rb.vel.x*=k;rb.vel.z*=k}rb.ang.multiplyScalar(Math.max(0,1-1.5*dt))}c.slideNow=contact?Math.hypot(rb.vel.x,rb.vel.z):0;rb.ang.multiplyScalar(1-(contact?0.8:0.05)*dt);{const lim=state.crashV0+2;const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>lim){rb.vel.x*=lim/hv;rb.vel.z*=lim/hv}if(rb.vel.y>3)rb.vel.y=3;const w2=rb.ang.length();if(w2>2.2)rb.ang.multiplyScalar(2.2/w2)}const hs=Math.hypot(rb.vel.x,rb.vel.z);
+ if(contact){const fa=new THREE.Vector3(0,0,1).applyQuaternion(p.quaternion);fa.y=0;const fl=fa.length();if(fl>0.3){fa.divideScalar(fl);const vl=rb.vel.x*fa.x+rb.vel.z*fa.z,lx=rb.vel.x-fa.x*vl,lz=rb.vel.z-fa.z*vl,ll=Math.hypot(lx,lz);const nl=Math.sign(vl)*Math.max(0,Math.abs(vl)-5.0*dt),kk=ll>1e-3?Math.max(0,ll-11*dt)/ll:0;rb.vel.x=fa.x*nl+lx*kk;rb.vel.z=fa.z*nl+lz*kk;{const upv=new THREE.Vector3(0,1,0).applyQuaternion(p.quaternion);if(ll>0.8&&upv.y>0.2){const dx=lx/ll,dz=lz/ll;const al=6*Math.min(1,ll/4)*dt;rb.ang.x+=dz*al;rb.ang.z-=dx*al}if(Math.abs(upv.y)<0.45){const f3=new THREE.Vector3(0,0,1).applyQuaternion(p.quaternion);const rl=rb.ang.dot(f3);rb.ang.addScaledVector(f3,-rl*Math.min(1,7*dt))}}if(ll>3&&rnd()<dt*ll*0.5&&low)dirtClod(low,rb.vel)}else{const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>1e-3){const k=Math.max(0,hv-6.5*dt)/hv;rb.vel.x*=k;rb.vel.z*=k}}rb.ang.multiplyScalar(Math.max(0,1-1.5*dt))}{const u2=new THREE.Vector3(0,1,0).applyQuaternion(p.quaternion);if(u2.y<0.3){const f3=new THREE.Vector3(0,0,1).applyQuaternion(p.quaternion);const rl=rb.ang.dot(f3);rb.ang.addScaledVector(f3,-rl*Math.min(1,(contact?9:3)*dt))}}c.slideNow=contact?Math.hypot(rb.vel.x,rb.vel.z):0;rb.ang.multiplyScalar(1-(contact?0.8:0.05)*dt);{const lim=state.crashV0+2;const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>lim){rb.vel.x*=lim/hv;rb.vel.z*=lim/hv}if(rb.vel.y>3)rb.vel.y=3;const w2=rb.ang.length();if(w2>2.2)rb.ang.multiplyScalar(2.2/w2)}const hs=Math.hypot(rb.vel.x,rb.vel.z);
  if(contact)state.slide+=hs;if(contact&&low&&hs>2&&rnd()<0.5){emit(dust,low.clone().add(new THREE.Vector3((rnd()-.5)*3,0.3,(rnd()-.5)*3)),new THREE.Vector3((rnd()-.5)*4,1.5+rnd()*3,(rnd()-.5)*4).addScaledVector(rb.vel,0.2),2.5+rnd()*2,3,12+rnd()*8);
   if(hs>8&&rnd()<.5)for(let q=0;q<3;q++)emit(sparks,low,new THREE.Vector3((rnd()-.5)*8,2+rnd()*5,(rnd()-.5)*8).addScaledVector(rb.vel,0.5),0.4+rnd()*0.5,0.35,0.1)}}
 // coupler between A (ahead) and B (behind)
@@ -1065,7 +1101,7 @@ function couple(A,B,dt,idx){if(A.broken||(A.onTrack&&B.onTrack))return;
  B.rb.vel.addScaledVector(n,lam);B.rb.ang.add(rBn.applyMatrix3(IB).multiplyScalar(lam));A.rb.vel.addScaledVector(n,-lam);A.rb.ang.add(rAn.applyMatrix3(IA).multiplyScalar(-lam))}
 function crashUpdate(dt){const slow=state.crashT<6?0.35:1;const sdt=dt*slow;state.crashT+=dt;const N=8,h=sdt/N;aiCrashStep(sdt);
  state.slide=0;sndBudget=0;for(const c of cars.concat(AICR,FRAGS)){if(!c.onTrack&&c.pivot){const P=c.pivot.position;let bs=c.gs,bd=1e9;for(let q=c.gs-80;q<=c.gs+80;q+=4){const a=at(q);const dd=(a.x-P.x)**2+(a.z-P.z)**2;if(dd<bd){bd=dd;bs=q}}c.gs=bs;setGround(c)}}
- for(let i=0;i<N;i++){const offFrac=cars.filter(c=>!c.onTrack).length/cars.length;const dec=(state.sharpCrash?1.2:0.6)+7*offFrac;for(const c of cars){if(c.onTrack){c.vT=Math.max(0,c.vT-dec*h);c.sF+=c.vT*h;c.gs=c.sF-c.len/2;trackPose(c);{const cs=c.sF-c.len/2,kk=K[clamp(Math.round(cs),0,TOTAL)];if(state.sharpCrash&&kk&&c.vT*c.vT*Math.abs(kk)>TR.derail*2.5){const out=sideV(cs).multiplyScalar(-Math.sign(kk));freeCar(c,fwd(cs).multiplyScalar(c.vT).addScaledVector(out,c.vT*0.14).setY(1.0),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()));c.rb.ang.y-=0.25*Math.sign(kk);continue}}c.rb.vel.copy(fwd(c.sF-c.len/2)).multiplyScalar(c.vT)}else{rbStep(c,h);hitObstacles(c,h)}}
+ for(let i=0;i<N;i++){const offFrac=cars.filter(c=>!c.onTrack).length/cars.length;const dec=(state.sharpCrash?1.2:0.6)+7*offFrac;for(const c of cars){if(c.onTrack){c.vT=Math.max(0,c.vT-dec*h);c.sF+=c.vT*h;c.gs=c.sF-c.len/2;trackPose(c);{const cs=c.sF-c.len/2,kk=K[clamp(Math.round(cs),0,TOTAL)];if(state.sharpCrash&&kk&&c.vT*c.vT*Math.abs(kk)>TR.derail*2.5){const out=sideV(cs).multiplyScalar(-Math.sign(kk));freeCar(c,fwd(cs).multiplyScalar(c.vT).addScaledVector(out,Math.min(6,c.vT*0.08)).setY(0.7),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()));c.rb.ang.y-=0.25*Math.sign(kk);continue}}c.rb.vel.copy(fwd(c.sF-c.len/2)).multiplyScalar(c.vT)}else{rbStep(c,h);hitObstacles(c,h)}}
   for(const c of AICR.concat(FRAGS)){rbStep(c,h);hitObstacles(c,h)}for(let it=0;it<2;it++)for(let j=1;j<cars.length;j++)couple(cars[j-1],cars[j],h,j);carCollide(h)}
  if(AC){const t=AC.currentTime,sl=state.slide/N;au.sg.gain.setTargetAtTime(Math.min(0.45,sl/70),t,.08);au.sf.frequency.setTargetAtTime(700+Math.min(sl,200)*9,t,.1);au.rgc.gain.setTargetAtTime(Math.min(0.7,sl/40),t,.1)}
  crashVisuals(sdt);updParticles(glassP,sdt,9.8,0.3,1);updParticles(dust,sdt,-0.25,0.6,0.55);updParticles(sparks,sdt,9.8,0.5,1);burnStep(sdt);updParticles(fireP,sdt,-2.2,1.4,0.95);updParticles(fireCore,sdt,-1.5,2.0,1);updParticles(blackS,sdt,-1.1,0.35,0.42);updParticles(smoke,sdt,-0.6,0.5,0.4);updParticles(steamP,sdt,-0.3,1.2,0.6);
