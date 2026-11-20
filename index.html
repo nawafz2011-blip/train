@@ -197,6 +197,8 @@ canvas#gl:active{cursor:grabbing}
     <div class="trains" id="trainPick"></div>
     <div class="pickLbl">جودة الرسوم</div>
     <div class="qrow" id="qPick"></div>
+    <div class="pickLbl">طريقة الطيحة</div>
+    <div class="qrow" id="csPick"></div>
     <div class="pickLbl">الطقس</div>
     <div class="qrow" id="wxPick"></div>
     <div class="pickLbl">الوقت</div>
@@ -891,7 +893,7 @@ function crashSound(){if(!AC)return;const t=AC.currentTime;const s=au.noise();co
  const o=AC.createOscillator();o.frequency.setValueAtTime(70,t);o.frequency.exponentialRampToValueAtTime(30,t+1);const og=AC.createGain();og.gain.setValueAtTime(.8,t);og.gain.exponentialRampToValueAtTime(.001,t+1.2);o.connect(og).connect(au.master);o.start(t);o.stop(t+1.3)}
 
 /* ================= state & physics ================= */
-const state={weather:'clear',todMode:'day',tod:0.45,mode:'menu',s:START_FRONT,v:0,odo:0,lever:0,em:false,force:0,time:0,score:1000,overT:0,cp:null,nextCp:2000,camMode:1,crashT:0,crashWhy:'',sideCam:null,chuffN:0,cruise:null,safe:false,route:[],lane:0,
+const state={crashStyle:'tip',weather:'clear',todMode:'day',tod:0.45,mode:'menu',s:START_FRONT,v:0,odo:0,lever:0,em:false,force:0,time:0,score:1000,overT:0,cp:null,nextCp:2000,camMode:1,crashT:0,crashWhy:'',sideCam:null,chuffN:0,cruise:null,safe:false,route:[],lane:0,
  orbit:{yaw:Math.PI+0.5,pitch:0.22,dist:42},look:{yaw:0,pitch:0}};
 const schedule=()=>Math.round(TOTAL/(TR.avg/KMH));
 function setLever(x){state.lever=clamp(Math.round(x*10)/10,-1,1);if(state.lever>0)state.em=false;drawLever()}
@@ -933,7 +935,9 @@ function cplPoint(c,front){return new THREE.Vector3(0,CPL_Y-c.comY,front?c.len/2
 function fwdOf(c){return new THREE.Vector3(0,0,1).applyQuaternion(c.pivot.quaternion)}
 // tipping over: the car keeps running along the track while it rolls about its outer rail; past ~70 degrees it leaves the rails and lands on its side
 // a car over the limit in a curve: a little too fast -> it leans over on the outer rail; far too fast -> the curve throws it off the track
-function curveDerail(c,cs,sev,sg){const out=sideV(cs).multiplyScalar(sg);crashBang(c);impactSnd(Math.min(1,0.5+sev*0.1));
+function curveDerail(c,cs,sev,sg){const out=sideV(cs).multiplyScalar(sg);
+ if(state.crashStyle==='classic'){if(c.onTrack&&cars.indexOf(c)!==state.firstDer&&!state.sharpCrash)return false;crashBang(c);impactSnd(0.7);freeCar(c,fwd(cs).multiplyScalar(c.vT).addScaledVector(out,c.vT*0.14).setY(1.0),UP.clone().cross(out).multiplyScalar(0.9+0.4*rnd()).addScaledVector(UP,-0.25*sg*-1));return true}
+ crashBang(c);impactSnd(Math.min(1,0.5+sev*0.1));
  if(true){c.tip={t:0,dur:Math.min(1.0,Math.max(0.5,1.05-(sev-1)*0.06))*(0.9+0.2*rnd()),sg};return false}
  const v=c.vT,ex=Math.min(1,(sev-1.7)/4);freeCar(c,fwd(cs).multiplyScalar(v).addScaledVector(out,v*(0.12+0.1*ex)).setY(1.0+1.5*ex),UP.clone().cross(out).multiplyScalar(1.8+1.2*ex+0.4*rnd()).addScaledVector(UP,-sg*(0.3+0.6*ex)));return true}
 function tipStep(c,h){const T=c.tip;T.t+=h;const cs=c.gs;const k=Math.min(1,Math.max(0,T.t)/T.dur);
@@ -1064,7 +1068,7 @@ function startCrash(kind,why,firstIdx=0,ai=null){if(state.mode!=='drive')return;
   const h=c.half;c.toSide=0;c.tip=null;c.onTrack=true;c.sF=s-c.frontOff;c.vT=v;c.gs=c.sF-c.len/2;setGround(c);fxInit(c);c.broken=false;c.sideDone=false;c.cf=0;c.rb={vel:fwd(c.sF-c.len/2).multiplyScalar(v),ang:new THREE.Vector3(),Ib:new THREE.Vector3(((2*h.y)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.z)**2)/12,((2*h.x)**2+(2*h.y)**2)/12)}});
  const c=cars[firstIdx];const cs=c.sF-c.len/2;const f=fwd(cs),sv=sideV(cs);
  if(kind==='curve'){const dirK=Math.sign(K[clamp(Math.round(cs),0,TOTAL)])||1;const out=sv.clone().multiplyScalar(-dirK);
-  curveDerail(c,cs,v*v*Math.abs(K[clamp(Math.round(cs),0,TOTAL)])/TR.derail,-dirK)}
+  state.firstDer=firstIdx;curveDerail(c,cs,v*v*Math.abs(K[clamp(Math.round(cs),0,TOTAL)])/TR.derail,-dirK)}
  else if(kind==='side'){const av=ai?ai.v:20;freeCar(c,f.clone().multiplyScalar(v*0.8).addScaledVector(sv,av*0.3+3).setY(0.6),f.clone().multiplyScalar(0.8).addScaledVector(UP,-0.5))}
  else{freeCar(c,f.clone().multiplyScalar(v*0.12).setY(1.8),sv.clone().multiplyScalar(-0.7).addScaledVector(UP,(rnd()-.5)*0.6))}
  state.crashKind=kind;{const kk=Math.abs(K[clamp(Math.round(cars[firstIdx].sF-cars[firstIdx].len/2),0,TOTAL)]);state.sharpCrash=kind==='curve'&&kk>1/200}state.crashV0=Math.max(v,ai?ai.v:0);if(ai){wreckAI(ai,kind==='side'?0.6:0.15);impactSnd(1);impactSnd(1);const cl=(v+ai.v)*KMH;if(kind==='collision'&&cl>=BOOM_KMH){const P=c.pivot.position.clone().lerp(ai.list[0].pivot.position,0.5);explode(P,Math.min(1.6,0.8+(cl-BOOM_KMH)/150));state.crashWhy+=` السرعة بينكم ${Math.round(cl)} كم/س، أكثر من ${BOOM_KMH} اللي تتحمله القطارات، فانفجر الوقود.`}}state.cplMax=0;state.cplBroken=[];state.v=0;state.force=0;state.crashCenter=c.pivot.position.clone();state.crashAng=Math.atan2(cam.position.x-state.crashCenter.x,cam.position.z-state.crashCenter.z)}
@@ -1084,10 +1088,10 @@ function rbStep(c,dt){const rb=c.rb,p=c.pivot;if(!p||!rb)return;c.impCd=(c.impCd
  rb.vel.y-=9.81*dt;p.position.addScaledVector(rb.vel,dt);const w=rb.ang.length();if(w>1e-5){tmpQ.setFromAxisAngle(tmpV.copy(rb.ang).divideScalar(w),w*dt);p.quaternion.premultiply(tmpQ).normalize()}
  const Iw=invI(c);let contact=false,low=null;
  for(const k of corners){const r=new THREE.Vector3(k.x*c.half.x,k.y*c.half.y,k.z*c.half.z).applyQuaternion(p.quaternion);const wp=r.clone().add(p.position);const gyc=groundUnder(c,wp);if(wp.y<gyc){contact=true;const gn=groundN(c,wp);p.position.addScaledVector(gn,(gyc-wp.y)*gn.y*0.8);
-  const vc=rb.vel.clone().add(rb.ang.clone().cross(r));const vn=vc.dot(gn);if(vn<-2.5&&c.impCd<=0){impactSnd(Math.min(1,-vn/9));crashFx(c,r,Math.min(1,-vn/9));c.impCd=0.4}if(vn<0){const rn=r.clone().cross(gn);const j=-1.25*vn/(1+rn.clone().applyMatrix3(Iw).dot(rn));rb.vel.addScaledVector(gn,j);rb.ang.add(rn.applyMatrix3(Iw).multiplyScalar(j));
+  const vc=rb.vel.clone().add(rb.ang.clone().cross(r));const vn=vc.dot(gn);if(vn<-2.5&&c.impCd<=0){impactSnd(Math.min(1,-vn/9));crashFx(c,r,Math.min(1,-vn/9));c.impCd=0.4}if(vn<0){const rn=r.clone().cross(gn);const j=-1.06*vn/(1+rn.clone().applyMatrix3(Iw).dot(rn));rb.vel.addScaledVector(gn,j);rb.ang.add(rn.applyMatrix3(Iw).multiplyScalar(j));
    const vt=vc.clone().addScaledVector(gn,-vn);const vtl=vt.length();if(vtl>1e-3){const t=vt.divideScalar(vtl).negate();const rt=r.clone().cross(t);const jt=Math.min(0.55*j,vtl/(1+rt.clone().applyMatrix3(Iw).dot(rt)));rb.vel.addScaledVector(t,jt);rb.ang.add(rt.applyMatrix3(Iw).multiplyScalar(jt))}}
   if(!low||wp.y<low.y)low=wp}}
- if(contact){const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>1e-3){const k=Math.max(0,hv-6.5*dt)/hv;rb.vel.x*=k;rb.vel.z*=k}rb.ang.multiplyScalar(Math.max(0,1-1.5*dt))}if(c.toSide){const u2=new THREE.Vector3(0,1,0).applyQuaternion(p.quaternion);if(u2.y<0.3){const f3=new THREE.Vector3(0,0,1).applyQuaternion(p.quaternion);const rl=rb.ang.dot(f3);rb.ang.addScaledVector(f3,-rl*Math.min(1,(contact?9:4)*dt))}}c.slideNow=contact?Math.hypot(rb.vel.x,rb.vel.z):0;rb.ang.multiplyScalar(1-(contact?0.8:0.05)*dt);{const lim=state.crashV0+2;const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>lim){rb.vel.x*=lim/hv;rb.vel.z*=lim/hv}if(rb.vel.y>3)rb.vel.y=3;const w2=rb.ang.length();if(w2>2.2)rb.ang.multiplyScalar(2.2/w2)}const hs=Math.hypot(rb.vel.x,rb.vel.z);
+ if(contact){const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>1e-3){const k=Math.max(0,hv-6.5*dt)/hv;rb.vel.x*=k;rb.vel.z*=k}rb.ang.multiplyScalar(Math.max(0,1-1.5*dt));rb.ang.y*=Math.max(0,1-2.5*dt);if(rb.vel.y>1)rb.vel.y=1}if(c.toSide){const u2=new THREE.Vector3(0,1,0).applyQuaternion(p.quaternion);if(u2.y<0.3){const f3=new THREE.Vector3(0,0,1).applyQuaternion(p.quaternion);const rl=rb.ang.dot(f3);rb.ang.addScaledVector(f3,-rl*Math.min(1,(contact?9:4)*dt))}}c.slideNow=contact?Math.hypot(rb.vel.x,rb.vel.z):0;rb.ang.multiplyScalar(1-(contact?0.8:0.05)*dt);{const lim=state.crashV0+2;const hv=Math.hypot(rb.vel.x,rb.vel.z);if(hv>lim){rb.vel.x*=lim/hv;rb.vel.z*=lim/hv}if(rb.vel.y>3)rb.vel.y=3;const w2=rb.ang.length();if(w2>2.2)rb.ang.multiplyScalar(2.2/w2)}const hs=Math.hypot(rb.vel.x,rb.vel.z);
  if(contact)state.slide+=hs;if(contact&&low&&hs>2&&rnd()<0.5){emit(dust,low.clone().add(new THREE.Vector3((rnd()-.5)*3,0.3,(rnd()-.5)*3)),new THREE.Vector3((rnd()-.5)*4,1.5+rnd()*3,(rnd()-.5)*4).addScaledVector(rb.vel,0.2),2.5+rnd()*2,3,12+rnd()*8);
   if(hs>8&&rnd()<.5)for(let q=0;q<3;q++)emit(sparks,low,new THREE.Vector3((rnd()-.5)*8,2+rnd()*5,(rnd()-.5)*8).addScaledVector(rb.vel,0.5),0.4+rnd()*0.5,0.35,0.1)}}
 // coupler between A (ahead) and B (behind)
@@ -1096,9 +1100,9 @@ function couple(A,B,dt,idx){if(A.broken||(A.onTrack&&B.onTrack))return;
  if(A.onTrack!==B.onTrack){const on=A.onTrack?A:B;const comp=pa.clone().sub(pb).dot(fwdOf(B));
   const frP=A.onTrack?pb:pa,sc=A.onTrack?A.sF-A.len-GAP/2:B.sF+GAP/2;const lat=Math.abs(frP.clone().sub(atL(sc)).dot(sideV(sc)));
   let pullOff=false;if(on.vT>3&&comp<-0.35){const fr0=A.onTrack?B:A;const tf=fwd(on.sF-on.len/2);const vf=fr0.rb.vel.x*tf.x+fr0.rb.vel.z*tf.z;const L=Math.abs(on.vT-vf)*0.35;if(L>state.cplMax)state.cplMax=L;
-   if(L>Math.max(RAIL_HOLD*2,TR.cpl*3)){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);return}if(L>RAIL_HOLD*(state.sharpCrash?2:1))pullOff=true;else{const nv=Math.max(0,(on.vT+vf)/2);fr0.rb.vel.addScaledVector(tf,nv-vf);for(const c of cars)if(c.onTrack)c.vT=Math.min(c.vT,nv+0.3);if(L>2&&(on.ccd||0)<=0){impactSnd(Math.min(1,L/12));on.ccd=0.5}}}
+   if(state.crashStyle!=='classic'&&L>Math.max(RAIL_HOLD*2,TR.cpl*3)){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);return}if(L>RAIL_HOLD*(state.sharpCrash?2:1))pullOff=true;else{const nv=Math.max(0,(on.vT+vf)/2);fr0.rb.vel.addScaledVector(tf,nv-vf);for(const c of cars)if(c.onTrack)c.vT=Math.min(c.vT,nv+0.3);if(L>2&&(on.ccd||0)<=0){impactSnd(Math.min(1,L/12));on.ccd=0.5}}}
   else if(!A.sideDone&&(lat>1.0||dist>1.5)){A.sideDone=true;const L=on.vT*0.35;if(L>state.cplMax)state.cplMax=L;
-   if(L>Math.max(RAIL_HOLD*2,TR.cpl*3)){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);toast(`انقطعت الوصلة ${idx}–${idx+1} من قوة الشد (${L.toFixed(0)})`,2200);return}
+   if(state.crashStyle!=='classic'&&L>Math.max(RAIL_HOLD*2,TR.cpl*3)){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);toast(`انقطعت الوصلة ${idx}–${idx+1} من قوة الشد (${L.toFixed(0)})`,2200);return}
    if(!state.sharpCrash&&L>RAIL_HOLD)pullOff=true;
    else if(L>TR.cpl){A.broken=true;crashBang(A);snapSnd();state.cplBroken.push(L);toast(`انقطعت الوصلة ${idx}–${idx+1} (الشد ${L.toFixed(1)}، قوتها ${TR.cpl})، والباقي ظل على السكة`,2800);return}
    else toast(`السكة مسكت العربة ${on===A?idx:idx+1} (الشد ${L.toFixed(1)})`,2200)}
@@ -1118,7 +1122,7 @@ function couple(A,B,dt,idx){if(A.broken||(A.onTrack&&B.onTrack))return;
  B.rb.vel.addScaledVector(n,lam);B.rb.ang.add(rBn.applyMatrix3(IB).multiplyScalar(lam));A.rb.vel.addScaledVector(n,-lam);A.rb.ang.add(rAn.applyMatrix3(IA).multiplyScalar(-lam))}
 function crashUpdate(dt){const slow=state.crashT<6?0.35:1;const sdt=dt*slow;state.crashT+=dt;const N=8,h=sdt/N;aiCrashStep(sdt);
  state.slide=0;sndBudget=0;for(const c of cars.concat(AICR,FRAGS)){if(!c.onTrack&&c.pivot){const P=c.pivot.position;let bs=c.gs,bd=1e9;for(let q=c.gs-80;q<=c.gs+80;q+=4){const a=at(q);const dd=(a.x-P.x)**2+(a.z-P.z)**2;if(dd<bd){bd=dd;bs=q}}c.gs=bs;setGround(c)}}
- for(let i=0;i<N;i++){const offFrac=cars.filter(c=>!c.onTrack||(c.tip&&c.tip.t>0)).length/cars.length;const dec=(state.sharpCrash?1.2:0.6)+7*offFrac;for(const c of cars){if(c.onTrack){c.vT=Math.max(0,c.vT-dec*h);c.sF+=c.vT*h;c.gs=c.sF-c.len/2;trackPose(c);if(c.tip&&tipStep(c,h))continue;{const cs=c.sF-c.len/2,kk=K[clamp(Math.round(cs),0,TOTAL)];if(kk&&!c.tip){const sev=c.vT*c.vT*Math.abs(kk)/TR.derail;if(sev>(state.sharpCrash?2.5:1.15)){if(curveDerail(c,cs,sev,-Math.sign(kk)))continue}}}c.rb.vel.copy(fwd(c.sF-c.len/2)).multiplyScalar(c.vT)}else{rbStep(c,h);hitObstacles(c,h)}}
+ for(let i=0;i<N;i++){const offFrac=cars.filter(c=>!c.onTrack||(c.tip&&c.tip.t>0)).length/cars.length;const dec=(state.sharpCrash?1.2:0.6)+7*offFrac;for(const c of cars){if(c.onTrack){c.vT=Math.max(0,c.vT-dec*h);c.sF+=c.vT*h;c.gs=c.sF-c.len/2;trackPose(c);if(c.tip&&tipStep(c,h))continue;{const cs=c.sF-c.len/2,kk=K[clamp(Math.round(cs),0,TOTAL)];if(kk&&!c.tip&&(state.crashStyle!=='classic'||state.sharpCrash)){const sev=c.vT*c.vT*Math.abs(kk)/TR.derail;if(sev>(state.sharpCrash?2.5:1.15)){if(curveDerail(c,cs,sev,-Math.sign(kk)))continue}}}c.rb.vel.copy(fwd(c.sF-c.len/2)).multiplyScalar(c.vT)}else{rbStep(c,h);hitObstacles(c,h)}}
   for(const c of AICR.concat(FRAGS)){rbStep(c,h);hitObstacles(c,h)}for(let it=0;it<2;it++)for(let j=1;j<cars.length;j++)couple(cars[j-1],cars[j],h,j);carCollide(h)}
  if(AC){const t=AC.currentTime,sl=state.slide/N;au.sg.gain.setTargetAtTime(Math.min(0.45,sl/70),t,.08);au.sf.frequency.setTargetAtTime(700+Math.min(sl,200)*9,t,.1);au.rgc.gain.setTargetAtTime(Math.min(0.7,sl/40),t,.1)}
  crashVisuals(sdt);updParticles(glassP,sdt,9.8,0.3,1);updParticles(dust,sdt,-0.25,0.6,0.55);updParticles(sparks,sdt,9.8,0.5,1);burnStep(sdt);updParticles(fireP,sdt,-2.2,1.4,0.95);updParticles(fireCore,sdt,-1.5,2.0,1);updParticles(blackS,sdt,-1.1,0.35,0.42);updParticles(smoke,sdt,-0.6,0.5,0.4);updParticles(steamP,sdt,-0.3,1.2,0.6);
@@ -1157,8 +1161,11 @@ function weatherFx(dt){const wx=state.weather;
   const m=new THREE.Points(g,new THREE.PointsMaterial({color:0xc89a62,size:0.12,transparent:true,opacity:.6,depthWrite:false}));m.frustumCulled=false;sc.add(m);sandFx={m,o,pos}}
  if(rainFx)rainFx.m.visible=wx==='rain';if(sandFx)sandFx.m.visible=wx==='sand';
  const C=cam.position,inCab=state.camMode===0&&TR.cab.hide&&state.mode!=='crash';
- if(wx==='rain'){const {o,pos}=rainFx;for(let i=0;i<o.length;i++){const q=o[i];q[1]-=24*dt;q[0]+=2*dt;if(q[1]<-8){q[1]+=30;q[0]=(rnd()-.5)*70;q[2]=(rnd()-.5)*70}if(q[0]>35)q[0]-=70;
-   const x=C.x+q[0],y=C.y+q[1],z=C.z+q[2];const hide=inCab&&q[0]*q[0]+q[2]*q[2]<6.5&&q[1]>-2.2;const L=hide?0:0.75;pos[i*6]=x;pos[i*6+1]=y;pos[i*6+2]=z;pos[i*6+3]=x+0.06;pos[i*6+4]=y+L;pos[i*6+5]=z}rainFx.m.geometry.attributes.position.needsUpdate=true}
+ if(wx==='rain'){const {o,pos}=rainFx;if(!rainFx.init){for(const q of o){q[0]+=C.x;q[1]+=C.y;q[2]+=C.z}rainFx.init=1;rainFx.pc=C.clone()}
+   const cv=C.clone().sub(rainFx.pc).divideScalar(Math.max(dt,1e-3));rainFx.pc.copy(C);if(cv.length()>400)cv.set(0,0,0);const rx=2-cv.x,ry=-24-cv.y,rz=-cv.z,rl=Math.hypot(rx,ry,rz),L=Math.min(2.6,Math.max(0.6,rl*0.03));
+   for(let i=0;i<o.length;i++){const q=o[i];q[1]-=24*dt;q[0]+=2*dt;if(q[1]<C.y-8){q[1]=C.y+22*rnd()+4;q[0]=C.x+(rnd()-.5)*70;q[2]=C.z+(rnd()-.5)*70}
+    if(q[0]-C.x>35)q[0]-=70;else if(q[0]-C.x<-35)q[0]+=70;if(q[2]-C.z>35)q[2]-=70;else if(q[2]-C.z<-35)q[2]+=70;
+    const dx=q[0]-C.x,dz=q[2]-C.z;const hide=inCab&&dx*dx+dz*dz<6.5&&q[1]-C.y>-2.2;const l=hide?0:L;pos[i*6]=q[0];pos[i*6+1]=q[1];pos[i*6+2]=q[2];pos[i*6+3]=q[0]-rx/rl*l;pos[i*6+4]=q[1]-ry/rl*l;pos[i*6+5]=q[2]-rz/rl*l}rainFx.m.geometry.attributes.position.needsUpdate=true}
  if(wx==='sand'){const {o,pos}=sandFx;const wdx=Math.cos(1.1),wdz=Math.sin(1.1);for(let i=0;i<o.length;i++){const q=o[i];q[0]+=wdx*16*dt;q[2]+=wdz*16*dt;q[1]+=Math.sin(state.time*3+i)*0.5*dt;for(const k of[0,2]){if(q[k]>40)q[k]-=80;if(q[k]<-40)q[k]+=80}
    pos[i*3]=C.x+q[0];pos[i*3+1]=C.y+q[1];pos[i*3+2]=C.z+q[2]}sandFx.m.geometry.attributes.position.needsUpdate=true}}
 /* ================= 3D cab ================= */
@@ -1281,6 +1288,7 @@ $('hStation').textContent=STATIONS[1].name;
  try{const w=localStorage.getItem('desertWx');if(WX[w])state.weather=w;const t=localStorage.getItem('desertTod');if(TD[t])state.todMode=t}catch(e){}
  const mk=(id,obj,key,ls)=>{$(id).innerHTML=Object.entries(obj).map(([k,n])=>`<button class="tcard" data-k="${k}" aria-pressed="${k===state[key]}"><b>${n}</b></button>`).join('');
   document.querySelectorAll('#'+id+' .tcard').forEach(b=>b.onclick=()=>{state[key]=b.dataset.k;try{localStorage.setItem(ls,b.dataset.k)}catch(e){}if(key==='todMode')state.tod=b.dataset.k==='cycle'?0.6:0.45;document.querySelectorAll('#'+id+' .tcard').forEach(x=>x.setAttribute('aria-pressed',x===b))})};
+ {const CS={tip:'يميل على جنبه',classic:'ينرمي مستقيم (القديمة)'};try{const c=localStorage.getItem('desertCS');if(CS[c])state.crashStyle=c}catch(e){}mk('csPick',CS,'crashStyle','desertCS')}
  mk('wxPick',WX,'weather','desertWx');mk('todPick',TD,'todMode','desertTod');state.tod=state.todMode==='cycle'?0.6:0.45}
 $('qPick').innerHTML=Object.entries(QUALS).map(([k,q])=>`<button class="tcard" data-q="${k}" aria-pressed="${k===qualKey}"><b>${q.name}</b></button>`).join('');
 document.querySelectorAll('#qPick .tcard').forEach(b=>b.onclick=()=>{const k=b.dataset.q;if(k===qualKey)return;qualKey=k;QUAL=QUALS[k];try{localStorage.setItem('desertQual2',k)}catch(e){}
@@ -1431,6 +1439,8 @@ function frame(now){if(now-last<1000/62){requestAnimationFrame(frame);return}
  audioUpdate(state.mode==='crash'?0:state.v,state.mode==='drive'?Math.max(0,state.force)/TR.F:0);
  updateHUD();if(state.cruise!=null)drawLever();
  const fp=state.mode==='crash'?state.crashCenter:state.camMode===3&&state.fly?state.fly.pos.clone().add(new THREE.Vector3(Math.sin(state.fly.yaw)*60,0,Math.cos(state.fly.yaw)*60)).setY(groundH(state.fly.pos.x,state.fly.pos.z)):at(state.s-Math.min(60,TRAIN_LEN/2));sun.position.copy(fp).addScaledVector(SUN,300);sun.target.position.copy(fp);sky.position.copy(cam.position);
+if(state.mode==='drive'&&state.camMode!==3){const k=Math.min(1,state.v/85);cam.fov+=8*k;cam.updateProjectionMatrix();const t=state.time;cam.rotateZ((Math.sin(t*31)+Math.sin(t*17.3))*0.0012*k);cam.rotateX(Math.sin(t*23.7)*0.0009*k);
+ if(state.v>18&&(groundKind()==='sand'||groundKind()==='rock')){const n=state.v*dt*0.9;for(let q=0;q<n;q++){const ss=state.s-TRAIN_LEN-rnd()*6;emit(dust,atL(ss,0.4).add(new THREE.Vector3(0,0,0)).setY(atL(ss).y+0.4+rnd()),fwd(ss).multiplyScalar(state.v*0.25).add(new THREE.Vector3((rnd()-.5)*4,0.6+rnd()*1.5,(rnd()-.5)*4)),1.6+rnd()*1.4,2,9+rnd()*6)}}}
 if(state.shake>0&&state.mode==='crash'){const a=state.shake*0.35;cam.position.x+=(rnd()-.5)*a;cam.position.y+=(rnd()-.5)*a;cam.position.z+=(rnd()-.5)*a}
  r.render(sc,cam);window.__ft=(window.__ft||0)*0.9+(performance.now()-now)*0.1;requestAnimationFrame(frame)}
 buildTrain(trainKey);pickTrain(trainKey);state.cp=freshCp();
